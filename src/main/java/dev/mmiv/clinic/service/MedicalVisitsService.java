@@ -23,11 +23,14 @@ public class MedicalVisitsService {
 
     private final MedicalVisitsRepository medicalVisitsRepository;
     private final PatientsRepository patientsRepository;
+    private final AuditLogService auditLogService;
 
     public MedicalVisitsService(MedicalVisitsRepository medicalVisitsRepository,
-                                PatientsRepository patientsRepository) {
+                                PatientsRepository patientsRepository,
+                                AuditLogService auditLogService) {
         this.medicalVisitsRepository = medicalVisitsRepository;
         this.patientsRepository = patientsRepository;
+        this.auditLogService = auditLogService;
     }
 
     public List<MedicalVisits> getMedicalVisits() {
@@ -83,6 +86,7 @@ public class MedicalVisitsService {
         MedicalVisits medicalVisits = medicalVisitsRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Medical visit not found"));
         saveOrUpdateMedicalVisit(medicalVisits, chartFile, diagnosticFile, dto);
+        auditLogService.record("MedicalVisits", id, "UPDATE", "Updated visit details");
     }
 
     public void deleteMedicalVisits(int id) {
@@ -141,11 +145,18 @@ public class MedicalVisitsService {
             String uploadDir = rootPath + "/uploads";
             new File(uploadDir).mkdirs();
 
-            String fileName = multipartFile.getOriginalFilename();
-            String uploadPath = uploadDir + "/" + fileName;
+            String originalName = multipartFile.getOriginalFilename();
+            String extension = "";
+            if (originalName != null && originalName.contains(".")) {
+                extension = originalName.substring(originalName.lastIndexOf("."));
+                originalName = originalName.substring(0, originalName.lastIndexOf("."));
+            }
+
+            String uniqueFileName = originalName + "_" + System.currentTimeMillis() + extension;
+            String uploadPath = uploadDir + "/" + uniqueFileName;
 
             multipartFile.transferTo(new File(uploadPath));
-            return "http://localhost:8080/uploads/" + fileName;
+            return "http://localhost:8080/uploads/" + uniqueFileName;
         }
         return null;
     }

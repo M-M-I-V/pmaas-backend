@@ -26,6 +26,7 @@ import java.util.Optional;
 public class PatientsService {
 
     private final PatientsRepository patientsRepository;
+    private final AuditLogService auditLogService;
 
     public void createPatient(PatientDTO dto) {
         Patients patient = mapDtoToEntity(dto, new Patients());
@@ -58,6 +59,7 @@ public class PatientsService {
         if (existing.isPresent()) {
             Patients updated = mapDtoToEntity(dto, existing.get());
             patientsRepository.save(updated);
+            auditLogService.record("Patients", id, "UPDATE", "Updated patient details");
         } else {
             throw new RuntimeException("Patient with ID " + id + " not found");
         }

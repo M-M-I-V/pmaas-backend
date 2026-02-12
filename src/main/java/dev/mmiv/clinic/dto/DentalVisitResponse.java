@@ -18,8 +18,9 @@ public record DentalVisitResponse(
         String plan,
         String treatment,
         String dentalChartImage,
+        String toothStatus,
         String diagnosticTestResult,
         String diagnosticTestImage,
-        String patientName,
+        String fullName,
         LocalDate birthDate
 ) {}

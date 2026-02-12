@@ -23,10 +23,14 @@ public class DentalVisitsService {
 
     private final DentalVisitsRepository dentalVisitsRepository;
     private final PatientsRepository patientsRepository;
+    private final AuditLogService auditLogService;
 
-    public DentalVisitsService(DentalVisitsRepository dentalVisitsRepository, PatientsRepository patientsRepository) {
+    public DentalVisitsService(DentalVisitsRepository dentalVisitsRepository,
+                               PatientsRepository patientsRepository,
+                               AuditLogService auditLogService) {
         this.dentalVisitsRepository = dentalVisitsRepository;
         this.patientsRepository = patientsRepository;
+        this.auditLogService = auditLogService;
     }
 
     public List<DentalVisits> getDentalVisits() {
@@ -58,6 +62,7 @@ public class DentalVisitsService {
                 visit.getPlan(),
                 visit.getTreatment(),
                 visit.getDentalChartImage(),
+                visit.getToothStatus(),
                 visit.getDiagnosticTestResult(),
                 visit.getDiagnosticTestImage(),
                 p.getFirstName() + " " + p.getLastName(),
@@ -79,6 +84,7 @@ public class DentalVisitsService {
         DentalVisits dentalVisits = dentalVisitsRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Dental visit not found"));
         saveOrUpdateDentalVisit(dentalVisits, chartFile, diagnosticFile, dto);
+        auditLogService.record("DentalVisits", dentalVisits.getId(), "UPDATE", "Updated visit details");
     }
 
     public void deleteDentalVisits(int id) {
@@ -111,6 +117,7 @@ public class DentalVisitsService {
             dentalVisits.setPlan(dto.getPlan());
             dentalVisits.setTreatment(dto.getTreatment());
             dentalVisits.setDiagnosticTestResult(dto.getDiagnosticTestResult());
+            dentalVisits.setToothStatus(dto.getToothStatus());
             dentalVisits.setPatient(patient);
 
             String chartImage = saveUploadedFile(chartFile);

@@ -14,4 +14,5 @@ import lombok.Setter;
 public class DentalVisits extends Visits {
 
     private String dentalChartImage;
+    private String toothStatus;
 }

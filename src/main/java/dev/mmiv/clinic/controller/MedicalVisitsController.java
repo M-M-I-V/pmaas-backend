@@ -36,11 +36,11 @@ public class MedicalVisitsController {
     @PostMapping("/add")
     @PreAuthorize("hasRole('MD')")
     public ResponseEntity<String> add(
-            @RequestParam(value = "chartFile", required = false) MultipartFile chartFile,
+            @RequestParam(value = "multipartFile", required = false) MultipartFile multipartFile,
             @RequestParam(value = "diagnosticFile", required = false) MultipartFile diagnosticFile,
             @ModelAttribute MedicalVisitRequest request
     ) throws IOException {
-        medicalVisitsService.createMedicalVisits(chartFile, diagnosticFile, request);
+        medicalVisitsService.createMedicalVisits(multipartFile, diagnosticFile, request);
         return ResponseEntity.ok("Medical visit successfully created.");
     }
 
@@ -48,11 +48,11 @@ public class MedicalVisitsController {
     @PreAuthorize("hasRole('MD')")
     public ResponseEntity<String> update(
             @PathVariable int id,
-            @RequestParam(value = "chartFile", required = false) MultipartFile chartFile,
+            @RequestParam(value = "multipartFile", required = false) MultipartFile multipartFile,
             @RequestParam(value = "diagnosticFile", required = false) MultipartFile diagnosticFile,
             @ModelAttribute MedicalVisitRequest request
     ) throws IOException {
-        medicalVisitsService.updateMedicalVisits(id, chartFile, diagnosticFile, request);
+        medicalVisitsService.updateMedicalVisits(id, multipartFile, diagnosticFile, request);
         return ResponseEntity.ok("Medical visit successfully updated.");
     }
 

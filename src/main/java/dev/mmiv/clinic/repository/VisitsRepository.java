@@ -46,7 +46,7 @@ public interface VisitsRepository extends JpaRepository<Visits, Integer>, JpaSpe
             p.birthDate,
             v.visitDate,
             CAST(v.visitType AS string),
-            v.symptoms,
+            v.chiefComplaint,
             v.physicalExamFindings,
             v.diagnosis,
             v.treatment

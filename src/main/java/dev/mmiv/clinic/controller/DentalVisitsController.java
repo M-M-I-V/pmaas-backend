@@ -37,7 +37,7 @@ public class DentalVisitsController {
     @PostMapping("/add")
     @PreAuthorize("hasRole('DMD')")
     public ResponseEntity<String> add(
-            @RequestParam(value = "chartFile", required = false) MultipartFile chartFile,
+            @RequestParam(value = "multipartFile", required = false) MultipartFile chartFile,
             @RequestParam(value = "diagnosticFile", required = false) MultipartFile diagnosticFile,
             @ModelAttribute DentalVisitRequest request
     ) throws IOException {
@@ -49,7 +49,7 @@ public class DentalVisitsController {
     @PreAuthorize("hasRole('DMD')")
     public ResponseEntity<String> update(
             @PathVariable int id,
-            @RequestParam(value = "chartFile", required = false) MultipartFile chartFile,
+            @RequestParam(value = "multipartFile", required = false) MultipartFile chartFile,
             @RequestParam(value = "diagnosticFile", required = false) MultipartFile diagnosticFile,
             @ModelAttribute DentalVisitRequest request
     ) throws IOException {

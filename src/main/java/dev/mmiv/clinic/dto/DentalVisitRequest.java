@@ -23,5 +23,6 @@ public class DentalVisitRequest {
     private String plan;
     private String treatment;
     private String diagnosticTestResult;
+    private String toothStatus;
     private int patientId;
 }
