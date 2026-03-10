@@ -32,8 +32,8 @@ build/
 ### VS Code ###
 .vscode/
 
-src/main/resources/application.properties
-src/main/resources/application-local.properties
+application.properties
+application-local.properties
 
 # Uploaded files
 uploads/
