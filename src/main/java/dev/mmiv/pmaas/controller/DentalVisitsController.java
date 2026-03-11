@@ -17,7 +17,6 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/visits/dental")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:3000", allowCredentials = "true")
 public class DentalVisitsController {
 
     private final DentalVisitsService dentalVisitsService;

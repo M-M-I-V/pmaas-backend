@@ -1,24 +1,39 @@
 package dev.mmiv.pmaas.service;
 
+import dev.mmiv.pmaas.dto.LoginRequest;
+import dev.mmiv.pmaas.dto.LoginResponse;
 import dev.mmiv.pmaas.dto.UserList;
+import dev.mmiv.pmaas.dto.UserResponse;
 import dev.mmiv.pmaas.entity.Users;
 import dev.mmiv.pmaas.repository.UsersRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
+/**
+ * Service for user management and authentication.
+ * verifyUser() returns LoginResponse (token + username + role + expiresAt).
+ *   getUsers() and getUserById() now return UserResponse — the password hash is never
+ *   included in any response leaving this service.
+ * verifyUser() accepts LoginRequest DTO, not the raw Users entity.
+ *   AuthenticationException is allowed to propagate to AuthController,
+ *   which catches it and returns a 401. The old "Login Failed" string return is removed.
+ */
 @Service
 public class UsersService {
 
-    UsersRepository usersRepository;
-    AuthenticationManager authenticationManager;
-    JWTService jwtService;
+    private final UsersRepository usersRepository;
+    private final AuthenticationManager authenticationManager;
+    private final JWTService jwtService;
+
+    @Value("${jwt.expiration-ms:28800000}")
+    private long expirationMs;
 
     public UsersService(UsersRepository usersRepository,
                         AuthenticationManager authenticationManager,
@@ -28,75 +43,95 @@ public class UsersService {
         this.jwtService = jwtService;
     }
 
-    BCryptPasswordEncoder bCryptPasswordEncoder = new BCryptPasswordEncoder(10);
+    private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder(10);
 
-    public String verifyUser(Users user) {
-        Authentication authentication = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(user.getUsername(), user.getPassword())
+    // Authentication
+    /**
+     * Authenticates the user and returns a structured LoginResponse.
+     * Throws BadCredentialsException / LockedException on failure — these propagate
+     * to AuthController which maps them to HTTP 401. The old "Login Failed" string
+     * return is removed.
+     */
+    public LoginResponse verifyUser(LoginRequest loginRequest) {
+        // Throws BadCredentialsException on invalid credentials
+        authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(
+                        loginRequest.username(),
+                        loginRequest.password()
+                )
         );
 
-        if (authentication.isAuthenticated()) {
-            Users dbUser = usersRepository.findByUsername(user.getUsername());
-            if (dbUser == null) {
-                throw new RuntimeException("User not found");
-            }
-            return jwtService.generateToken(dbUser);
-        } else {
-            return "Login Failed";
+        Users dbUser = usersRepository.findByUsername(loginRequest.username());
+        if (dbUser == null) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Authentication succeeded but user record not found.");
         }
+
+        String token    = jwtService.generateToken(dbUser);
+        long expiresAt  = System.currentTimeMillis() + expirationMs;
+
+        return new LoginResponse(token, dbUser.getUsername(), dbUser.getRole().name(), expiresAt);
     }
+
+    // ── User CRUD ─────────────────────────────────────────────────────────────
 
     public void createUser(Users user) {
         if (usersRepository.findByUsername(user.getUsername()) != null) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Username already exists");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Username already exists.");
         }
-
-        user.setPassword(bCryptPasswordEncoder.encode(user.getPassword()));
+        user.setPassword(passwordEncoder.encode(user.getPassword()));
         usersRepository.save(user);
     }
 
-    public List<Users> getUsers() {
-        return usersRepository.findAll();
+    /** Returns UserResponse list — password hash excluded. */
+    public List<UserResponse> getUsers() {
+        return usersRepository.findAll().stream()
+                .map(this::toUserResponse)
+                .toList();
     }
 
-    public Users getUserById(int id) {
+    // Returns UserResponse — password hash excluded. */
+    public UserResponse getUserById(int id) {
         return usersRepository.findById(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+                .map(this::toUserResponse)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "User not found."));
     }
 
     public List<UserList> getUsersList() {
         return usersRepository.findAll().stream()
-                .map(user -> new UserList(
-                        user.getId(),
-                        user.getUsername(),
-                        user.getRole().name()
-                ))
+                .map(u -> new UserList(u.getId(), u.getUsername(), u.getRole().name()))
                 .toList();
     }
 
     public void updateUser(int id, Users updatedUser) {
-        Users existingUser = usersRepository.findById(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        Users existing = usersRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "User not found."));
 
-        Users sameUsernameUser = usersRepository.findByUsername(updatedUser.getUsername());
-        if (sameUsernameUser != null && sameUsernameUser.getId() != id) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Username already in use");
+        Users conflict = usersRepository.findByUsername(updatedUser.getUsername());
+        if (conflict != null && conflict.getId() != id) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Username already in use.");
         }
 
-        existingUser.setUsername(updatedUser.getUsername());
-        existingUser.setRole(updatedUser.getRole());
+        existing.setUsername(updatedUser.getUsername());
+        existing.setRole(updatedUser.getRole());
 
-        if (!bCryptPasswordEncoder.matches(updatedUser.getPassword(), existingUser.getPassword())) {
-            existingUser.setPassword(bCryptPasswordEncoder.encode(updatedUser.getPassword()));
+        if (!passwordEncoder.matches(updatedUser.getPassword(), existing.getPassword())) {
+            existing.setPassword(passwordEncoder.encode(updatedUser.getPassword()));
         }
 
-        usersRepository.save(existingUser);
+        usersRepository.save(existing);
     }
 
     public void deleteUserById(int id) {
         if (!usersRepository.existsById(id)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found.");
         }
         usersRepository.deleteById(id);
+    }
+
+    private UserResponse toUserResponse(Users user) {
+        return new UserResponse(user.getId(), user.getUsername(), user.getRole().name());
     }
 }
