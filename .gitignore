@@ -33,3 +33,8 @@ src/main/resources/application-local.properties
 
 ### VS Code ###
 .vscode/
+
+application-local.properties
+
+# Uploaded files
+uploads/
