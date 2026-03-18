@@ -46,14 +46,15 @@ public class WebSecurityConfiguration {
                                                    CorsConfigurationSource corsConfigurationSource) {
         http
                 .authorizeHttpRequests(requests -> requests
-                        // Public: login endpoint only — no other endpoint is unauthenticated
+                        // login endpoint only — no other endpoint is unauthenticated
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers("/uploads/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
-                // CSRF disabled: safe for stateless JWT APIs (no session cookies)
+                // CSRF disabled (no session cookies)
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);

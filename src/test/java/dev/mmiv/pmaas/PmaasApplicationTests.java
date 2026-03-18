@@ -2,9 +2,11 @@ package dev.mmiv.pmaas;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 
 @SpringBootTest
-class ClinicApplicationTests {
+@ActiveProfiles("local")
+class PmaasApplicationTests {
 
 	@Test
 	void contextLoads() {
