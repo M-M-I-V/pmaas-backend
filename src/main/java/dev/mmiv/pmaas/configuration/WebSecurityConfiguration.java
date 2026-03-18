@@ -48,7 +48,6 @@ public class WebSecurityConfiguration {
                 .authorizeHttpRequests(requests -> requests
                         // login endpoint only — no other endpoint is unauthenticated
                         .requestMatchers("/api/auth/**").permitAll()
-                        .requestMatchers("/uploads/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(session -> session
