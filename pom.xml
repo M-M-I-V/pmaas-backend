@@ -29,6 +29,14 @@
 	<properties>
 		<java.version>21</java.version>
 	</properties>
+
+	<!--
+	  Force patched Jackson versions (v2 and v3) to resolve CVE-2026-29062.
+	  Required due to mixed transitive dependencies:
+	  - Spring Boot uses Jackson 3
+	  - JJWT still depends on Jackson 2
+	  Using BOMs ensures all Jackson modules are aligned and prevents runtime conflicts.
+	-->
 	<dependencyManagement>
 		<dependencies>
 			<dependency>
@@ -47,6 +55,7 @@
 			</dependency>
 		</dependencies>
 	</dependencyManagement>
+
 	<dependencies>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
