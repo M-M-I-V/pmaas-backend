@@ -1,0 +1,61 @@
+# docker-compose.yml — Local Development Stack
+# Starts PostgreSQL (and optionally pgAdmin for a GUI) for local development.
+# The Spring Boot application itself is run with `mvn spring-boot:run` locally
+# (outside Docker) for fast hot-reload during development.
+#
+# USAGE:
+#   Start the database:         docker-compose up -d postgres
+#   Start database + pgAdmin:   docker-compose up -d
+#   Stop everything:            docker-compose down
+#   Destroy data too:           docker-compose down -v
+#   View logs:                  docker-compose logs -f postgres
+#
+# CREDENTIALS match application-local.properties defaults.
+# Change them in both files if you customise.
+#
+# pgAdmin web UI:
+#   URL:      http://localhost:5050
+#   Email:    admin@pmaas.local
+#   Password: (see PGADMIN_DEFAULT_PASSWORD below)
+#   To connect: register a new server with host=postgres, port=5432
+
+services:
+
+  postgres:
+    image: postgres:17-alpine            # Pin major version — never use :latest
+    container_name: pmaas_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       mcst_clinic_dev
+      POSTGRES_USER:     pmaas_dev
+      POSTGRES_PASSWORD: dev_password_change_me
+    ports:
+      - "5432:5432"                      # Exposed to host so mvn spring-boot:run can connect
+    volumes:
+      - postgres_data:/var/lib/postgresql/data   # Persistent data across restarts
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pmaas_dev -d mcst_clinic_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4:8              # pgAdmin 4 — GUI for PostgreSQL
+    container_name: pmaas_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL:    admin@pmaas.local
+      PGADMIN_DEFAULT_PASSWORD: pgadmin_local_only
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+    driver: local
+  pgadmin_data:
+    driver: local
