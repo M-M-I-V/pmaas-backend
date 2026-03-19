@@ -2,27 +2,37 @@ package dev.mmiv.pmaas.service;
 
 import dev.mmiv.pmaas.entity.AuditLog;
 import dev.mmiv.pmaas.repository.AuditLogRepository;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.stereotype.Service;
-
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
+import java.util.List;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
 
 /**
- * Centralised service for writing append-only, tamper-evident audit log entries.
- * Every entry is linked to the previous entry via a SHA-256 hash chain.
- * Any deletion or modification of a record in the database breaks the chain,
- * making tampering detectable by AuditIntegrityService (to be added in Phase 3).
- * Usage:
- *   auditLogService.record("Patients", patient.getId(), "CREATE", "Created patient record");
- *   auditLogService.record("AUTH",     0,                "LOGIN",  "Login from 192.168.1.1");
- * This service intentionally exposes ONLY record(). No read, update, or delete methods.
- * Reads are handled by AuditLogController → AuditLogRepository (read-only queries).
+ * Centralised, tamper-evident audit logging service.
+ * Hash chaining:
+ *   Each entry stores a SHA-256 hash of its own field values concatenated with the
+ *   previous entry's hash. The first entry uses "GENESIS" as its anchor.
+ *   Any deletion, reordering, or field edit in the database breaks the chain.
+ *   AuditIntegrityService (Phase 3 addition) can walk all records, recompute hashes,
+ *   and alert when a discrepancy is found.
+ * Single access point:
+ *   AuditLogController previously injected AuditLogRepository directly. All reads
+ *   now go through getLogsForRecord() defined here so any future access controls,
+ *   pagination limits, or response-shaping logic apply uniformly.
+ * Audit event coverage (complete list):
+ *   AUTH       — LOGIN, LOGIN_FAILED, LOGOUT, RATE_LIMITED
+ *   Patients   — CREATE, UPDATE, DELETE
+ *   MedicalVisits — CREATE, UPDATE, DELETE, READ (sensitive record access)
+ *   DentalVisits  — CREATE, UPDATE, DELETE, READ
+ * USAGE — call from service layer, never from controllers:
+ *   auditLogService.record("Patients", patient.getId(), "CREATE", "Patient created");
+ *   auditLogService.record("AUTH",     0,               "LOGIN",  "IP: 192.168.1.1");
  */
 @Slf4j
 @Service
@@ -31,92 +41,144 @@ public class AuditLogService {
 
     private final AuditLogRepository auditLogRepository;
 
-    // Public API
+    // Write API
 
     /**
-     * Records an audit event for a specific entity record.
-     * @param entityName The class/table name affected ("Patients", "MedicalVisits", "AUTH", etc.)
-     * @param recordId   The primary key of the affected record. Use 0 for non-record events.
-     * @param action     The action: CREATE | READ | UPDATE | DELETE | LOGIN | LOGIN_FAILED | LOGOUT
-     * @param details    Human-readable description. Keep concise; never include PHI here.
+     * Appends an immutable, hash-chained audit entry.
+     * This method is intentionally fail-safe: if the audit write fails (e.g. DB
+     * is temporarily unavailable), the failure is logged loudly but never thrown
+     * to the caller. The main business operation must not be aborted because of
+     * an audit failure — that would create a denial-of-service vector.
+     * @param entityName  The entity type affected ("Patients", "AUTH", etc.)
+     * @param recordId    The PK of the affected row; use 0 for non-row events.
+     * @param action      CREATE | READ | UPDATE | DELETE | LOGIN | LOGIN_FAILED | LOGOUT
+     * @param details     Brief, human-readable context. Never include passwords or tokens.
      */
-    public void record(String entityName, int recordId, String action, String details) {
-        String username = resolveCurrentUsername();
-        LocalDateTime timestamp = LocalDateTime.now();
+    public void record(
+        String entityName,
+        int recordId,
+        String action,
+        String details
+    ) {
+        String username = resolveUsername();
+        LocalDateTime ts = LocalDateTime.now();
 
-        // Retrieve the previous hash to extend the chain.
-        // If this is the very first entry, "GENESIS" anchors the chain.
-        String prevHash = auditLogRepository.findTopByOrderByIdDesc()
-                .map(AuditLog::getHash)
-                .orElse("GENESIS");
+        String prevHash = auditLogRepository
+            .findTopByOrderByIdDesc()
+            .map(AuditLog::getHash)
+            .orElse("GENESIS");
 
-        String hash = computeChainHash(entityName, recordId, action, username, timestamp, details, prevHash);
+        String hash = computeChainHash(
+            entityName,
+            recordId,
+            action,
+            username,
+            ts,
+            details,
+            prevHash
+        );
 
         AuditLog entry = AuditLog.builder()
-                .entityName(entityName)
-                .recordId(recordId)
-                .action(action)
-                .username(username)
-                .timestamp(timestamp)
-                .details(details)
-                .hash(hash)
-                .build();
+            .entityName(entityName)
+            .recordId(recordId)
+            .action(action)
+            .username(username)
+            .timestamp(ts)
+            .details(details)
+            .hash(hash)
+            .build();
 
         try {
             auditLogRepository.save(entry);
         } catch (Exception ex) {
-            // Audit failure must NEVER crash the main operation.
-            // Log the failure loudly so it can be investigated.
-            log.error("AUDIT FAILURE — could not persist audit entry: entity={} id={} action={} user={}",
-                    entityName, recordId, action, username, ex);
+            // Loud logging — this must be investigated but must not crash the caller.
+            log.error(
+                "AUDIT WRITE FAILURE — entity={} id={} action={} user={}",
+                entityName,
+                recordId,
+                action,
+                username,
+                ex
+            );
         }
     }
 
-    // Private Helpers
+    // Read API
 
     /**
-     * Extracts the authenticated username from the SecurityContext.
-     * Returns "SYSTEM" for automated/non-interactive operations.
-     * Returns "ANONYMOUS" if somehow called before authentication.
+     * Returns all audit entries for a specific record, newest first.
+     * AuditLogController uses this instead of injecting the repository directly.
      */
-    private String resolveCurrentUsername() {
+    public List<AuditLog> getLogsForRecord(String entityName, int recordId) {
+        return auditLogRepository.findByEntityNameAndRecordIdOrderByTimestampDesc(
+            entityName,
+            recordId
+        );
+    }
+
+    // Private helpers
+
+    /**
+     * Resolves the currently authenticated username from the SecurityContext.
+     * Returns "SYSTEM" for automated/non-interactive threads.
+     * Returns "ANONYMOUS" if called before authentication completes (should not happen
+     * on any secured endpoint, but is defensive for edge cases).
+     */
+    private String resolveUsername() {
         try {
             var auth = SecurityContextHolder.getContext().getAuthentication();
-            if (auth != null && auth.isAuthenticated() && !"anonymousUser".equals(auth.getPrincipal())) {
+            if (
+                auth != null &&
+                auth.isAuthenticated() &&
+                !"anonymousUser".equals(auth.getPrincipal())
+            ) {
                 return auth.getName();
             }
         } catch (Exception ignored) {
-            // SecurityContext may not be available in async contexts.
+            // SecurityContext may be unavailable in async threads.
         }
         return "SYSTEM";
     }
 
     /**
-     * Computes a SHA-256 hash over all fields of the new entry plus the previous entry's hash.
-     * The pipe character '|' is used as a field delimiter.
-     * Breaking the chain (by deleting a record, modifying a field, or reordering records)
-     * causes subsequent hashes to no longer match when the chain is re-verified.
+     * Computes SHA-256(entityName|recordId|action|username|timestamp|details|prevHash).
+     * The pipe character '|' is the field delimiter. Fields are concatenated in a
+     * deterministic order so the hash can be independently reproduced for verification.
+     * Null details are normalised to an empty string before hashing.
+     * SHA-256 is guaranteed available by the Java specification (JCA mandatory algorithms),
+     * so NoSuchAlgorithmException is wrapped in an IllegalStateException rather than
+     * being declared as a checked exception.
      */
-    private String computeChainHash(String entityName, int recordId, String action,
-                                    String username, LocalDateTime timestamp,
-                                    String details, String prevHash) {
-        String payload = String.join("|",
-                entityName,
-                String.valueOf(recordId),
-                action,
-                username,
-                timestamp.toString(),
-                details != null ? details : "",
-                prevHash
+    private String computeChainHash(
+        String entityName,
+        int recordId,
+        String action,
+        String username,
+        LocalDateTime timestamp,
+        String details,
+        String prevHash
+    ) {
+        String payload = String.join(
+            "|",
+            entityName,
+            String.valueOf(recordId),
+            action,
+            username,
+            timestamp.toString(),
+            details != null ? details : "",
+            prevHash
         );
-
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hashBytes = digest.digest(payload.getBytes(StandardCharsets.UTF_8));
+            byte[] hashBytes = digest.digest(
+                payload.getBytes(StandardCharsets.UTF_8)
+            );
             return HexFormat.of().formatHex(hashBytes);
         } catch (NoSuchAlgorithmException ex) {
-            // SHA-256 is guaranteed to be available by the Java spec.
-            throw new IllegalStateException("SHA-256 algorithm not available", ex);
+            throw new IllegalStateException(
+                "SHA-256 not available — JVM is non-conformant",
+                ex
+            );
         }
     }
 }

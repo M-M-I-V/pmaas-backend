@@ -1,22 +1,27 @@
 package dev.mmiv.pmaas.entity;
 
 import jakarta.persistence.*;
+import java.time.LocalDateTime;
 import lombok.*;
 
-import java.time.LocalDateTime;
-
 /**
- * Immutable audit log record.
- * - @Setter removed: no code path can mutate a persisted record.
- * - All business columns are marked updatable = false: Hibernate will
- * never include them in an UPDATE statement even if accidentally modified.
- * - @AllArgsConstructor is PRIVATE: construction goes exclusively through
- * the @Builder so every field is set intentionally at creation time.
- * - A 'hash' field enables SHA-256 hash chaining (see AuditLogService):
- * each entry hashes its own content + the previous entry's hash,
- * making any deletion or modification of a record detectable.
- * JPA requires a no-arg constructor — @NoArgsConstructor(access = AccessLevel.PROTECTED)
- * satisfies that requirement without exposing it to the public API.
+ * Append-only, tamper-evident audit log record.
+ * Three layers of immutability:
+ *   1. @Setter REMOVED from class: no application code can call a setter after
+ *      construction. The only way to populate fields is through @Builder.
+ *   2. updatable = false on every @Column: even if a developer mistakenly
+ *      obtains an instance and modifies a field in memory, Hibernate will never
+ *      include those fields in an UPDATE statement. The database record is safe.
+ *   3. hash field: each entry stores a SHA-256 hash of its own content plus the
+ *      previous entry's hash. Any deletion, reordering, or field modification
+ *      breaks the chain and is detectable by AuditIntegrityService.
+ *      See AuditLogService.computeChainHash() for the exact payload format.
+ * JPA requires a no-arg constructor — @NoArgsConstructor satisfies that contract
+ * without opening a public setter surface.
+ * DATABASE MIGRATION (run before deploying this change):
+ *   ALTER TABLE audit_log ADD COLUMN hash VARCHAR(64);
+ *   -- The column is nullable initially so existing rows are not rejected.
+ *   -- New rows will always have a hash; old rows retain NULL.
  */
 @Entity
 @Table(name = "audit_log")
@@ -30,34 +35,34 @@ public class AuditLog {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** The entity type that was affected, e.g. "Patients", "MedicalVisits", "AUTH". */
+    /** Entity class / table name affected — e.g. "Patients", "MedicalVisits", "AUTH". */
     @Column(nullable = false, updatable = false)
     private String entityName;
 
-    /** The primary key of the affected record. 0 for non-record events (e.g. LOGIN). */
+    /** PK of the affected record; use 0 for non-record events (LOGIN, LOGOUT). */
     @Column(nullable = false, updatable = false)
     private int recordId;
 
-    /** The action performed: CREATE, READ, UPDATE, DELETE, LOGIN, LOGIN_FAILED, LOGOUT. */
+    /** Action verb: CREATE | READ | UPDATE | DELETE | LOGIN | LOGIN_FAILED | LOGOUT | RATE_LIMITED */
     @Column(nullable = false, updatable = false)
     private String action;
 
-    /** The authenticated username who performed the action, or "SYSTEM". */
+    /** Authenticated username at the time of the event, or "SYSTEM" for automated operations. */
     @Column(nullable = false, updatable = false)
     private String username;
 
-    /** Server-side timestamp at the moment the event was recorded. */
+    /** Server-side timestamp recorded at the moment the event is persisted. */
     @Column(nullable = false, updatable = false)
     private LocalDateTime timestamp;
 
-    /** Human-readable description of the change. May be null for access events. */
+    /** Human-readable description. Never include passwords or tokens here. */
     @Column(columnDefinition = "TEXT", updatable = false)
     private String details;
 
     /**
-     * SHA-256 hash of (entityName | recordId | action | username | timestamp | details | prevHash).
-     * The first record in the chain uses "GENESIS" as prevHash.
-     * Any gap, reordering, or modification of records breaks the chain.
+     * SHA-256 hash of the concatenated fields of this entry plus the previous entry's hash.
+     * The very first entry in the table uses the string "GENESIS" as the previous hash.
+     * Stored as 64 hex characters (256 bits / 4 bits-per-hex-char).
      */
     @Column(length = 64, updatable = false)
     private String hash;

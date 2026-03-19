@@ -8,38 +8,50 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDate;
 import java.util.List;
 
-import java.time.LocalDate;
-
+/**
+ * All FUNCTION('MONTH'/'YEAR', ...) calls replaced with EXTRACT().
+ * Why this matters:
+ *   FUNCTION() is a JPQL escape hatch that delegates to the underlying database's
+ *   native function by name. MySQL exposes MONTH() and YEAR(). PostgreSQL does not —
+ *   it uses the SQL-standard EXTRACT(MONTH FROM ...) / EXTRACT(YEAR FROM ...) syntax.
+ *   Using EXTRACT() here makes every query run correctly on both MySQL (current)
+ *   and PostgreSQL (planned migration) without any code change at cutover.
+ */
 @Repository
 public interface VisitsRepository extends JpaRepository<Visits, Integer>, JpaSpecificationExecutor<Visits> {
-  
-  @Query("SELECT COUNT(v) FROM Visits v WHERE v.visitDate = CURRENT_DATE")
-  long countTodayVisits();
 
-  @Query("SELECT COUNT(v) FROM Visits v WHERE FUNCTION('MONTH', v.visitDate) = FUNCTION('MONTH', CURRENT_DATE) AND FUNCTION('YEAR', v.visitDate) = FUNCTION('YEAR', CURRENT_DATE)")
-  long countMonthVisits();
+    @Query("SELECT COUNT(v) FROM Visits v WHERE v.visitDate = CURRENT_DATE")
+    long countTodayVisits();
 
-  @Query("SELECT v.diagnosis, COUNT(v) " +
-          "FROM Visits v " +
-          "WHERE FUNCTION('MONTH', v.visitDate) = FUNCTION('MONTH', CURRENT_DATE) " +
-          "AND FUNCTION('YEAR', v.visitDate) = FUNCTION('YEAR', CURRENT_DATE) " +
-          "GROUP BY v.diagnosis " +
-          "ORDER BY COUNT(v) DESC")
-  List<Object[]> countTopDiagnosesThisMonth();
+    // FUNCTION('MONTH',...) and FUNCTION('YEAR',...)
+    @Query("SELECT COUNT(v) FROM Visits v " +
+            "WHERE EXTRACT(MONTH FROM v.visitDate) = EXTRACT(MONTH FROM CURRENT_DATE) " +
+            "AND EXTRACT(YEAR FROM v.visitDate)  = EXTRACT(YEAR FROM CURRENT_DATE)")
+    long countMonthVisits();
 
-  @Query("SELECT v.visitDate, COUNT(v) " +
-          "FROM Visits v " +
-          "WHERE v.visitDate >= :cutoffDate " +
-          "GROUP BY v.visitDate " +
-          "ORDER BY v.visitDate")
-  List<Object[]> countVisitsTrendLast30Days(LocalDate cutoffDate);
+    // same replacement in the GROUP BY aggregation query
+    @Query("SELECT v.diagnosis, COUNT(v) " +
+            "FROM Visits v " +
+            "WHERE EXTRACT(MONTH FROM v.visitDate) = EXTRACT(MONTH FROM CURRENT_DATE) " +
+            "AND EXTRACT(YEAR FROM v.visitDate)  = EXTRACT(YEAR FROM CURRENT_DATE) " +
+            "GROUP BY v.diagnosis " +
+            "ORDER BY COUNT(v) DESC")
+    List<Object[]> countTopDiagnosesThisMonth();
 
-  @Query("SELECT v FROM Visits v JOIN FETCH v.patient")
-  List<Visits> findAllWithPatient();
+    @Query("SELECT v.visitDate, COUNT(v) " +
+            "FROM Visits v " +
+            "WHERE v.visitDate >= :cutoffDate " +
+            "GROUP BY v.visitDate " +
+            "ORDER BY v.visitDate")
+    List<Object[]> countVisitsTrendLast30Days(@Param("cutoffDate") LocalDate cutoffDate);
 
-  @Query("""
+    @Query("SELECT v FROM Visits v JOIN FETCH v.patient")
+    List<Visits> findAllWithPatient();
+
+    @Query("""
         SELECT new dev.mmiv.pmaas.dto.VisitsList(
             v.id,
             CONCAT(p.firstName, ' ', p.lastName),
@@ -55,6 +67,6 @@ public interface VisitsRepository extends JpaRepository<Visits, Integer>, JpaSpe
         JOIN v.patient p
         WHERE p.id = :patientId
         ORDER BY v.visitDate DESC
-  """)
-  List<VisitsList> findVisitsListByPatientId(@Param("patientId") int patientId);
+    """)
+    List<VisitsList> findVisitsListByPatientId(@Param("patientId") int patientId);
 }
