@@ -38,3 +38,9 @@ application-local.properties
 
 # Uploaded files
 uploads/
+
+### Docker & Secrets ###
+.env
+.env.local
+postgres_data/
+pgadmin_data/
