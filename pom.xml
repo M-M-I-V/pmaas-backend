@@ -6,7 +6,8 @@
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
 		<version>4.0.3</version>
-		<relativePath/> </parent>
+		<relativePath/>
+	</parent>
 
 	<groupId>dev.mmiv</groupId>
 	<artifactId>pmaas</artifactId>
@@ -18,16 +19,50 @@
 	<developers><developer/></developers>
 	<scm><connection/><developerConnection/><tag/><url/></scm>
 
+	<!--
+	VERSION OVERRIDES — CVE remediation floor pins
+	These override the versions provided by the Spring Boot 4.0.3 BOM.
+	If the BOM ever ships a patched version higher than these, Maven's
+	nearest-wins rule means the BOM wins — these are floors, not ceilings.
+	Verify resolution with: mvn dependency:tree | grep -E "spring-security-web|spring-web|spring-webmvc"
+	-->
 	<properties>
 		<java.version>21</java.version>
+
+		<!--
+		CVE-2026-22732 (CVSS 9.1) — HTTP response headers may not be written in servlet apps.
+		CRITICAL for this application: CookieUtil, JwtAuthEntryPoint, and WebSecurityConfiguration
+		all rely on Set-Cookie and security response headers being written reliably.
+		Silent header loss in a PHI system = authentication bypass / cookie loss.
+		Fixed in: Spring Security 7.0.4
+		Scan confirmed: spring-security-web:7.0.3 was resolving from the BOM.
+		-->
+		<spring-security.version>7.0.4</spring-security.version>
+
+		<!--
+		CVE-2026-22737 (CVSS 5.9) — Script template view path traversal.
+		CVE-2026-22735 (CVSS 2.6) — SSE stream corruption.
+		Both fixed in Spring Framework 7.0.6.
+		NOTE: 7.0.11 (previously set) does not exist in Maven Central as of this writing.
+		Maven silently fell back to the BOM-managed 7.0.5, leaving CVEs unpatched.
+		7.0.6 is the minimum confirmed-available safe version.
+		Scan confirmed: spring-webmvc:7.0.5 and spring-web:7.0.5 were resolving.
+		-->
+		<spring-framework.version>7.0.6</spring-framework.version>
 	</properties>
 
 	<!--
-	  Force patched Jackson versions (v2 and v3) to resolve CVE-2026-29062.
-	  Required due to mixed transitive dependencies:
-	  - Spring Boot uses Jackson 3
-	  - JJWT still depends on Jackson 2
-	  Using BOMs ensures all Jackson modules are aligned and prevents runtime conflicts.
+	JACKSON NOTE:
+	Spring Boot 4 uses Jackson 3 under the new groupId 'tools.jackson'.
+	Only the tools.jackson BOM is declared here. The com.fasterxml.jackson
+	(Jackson 2) BOM has been REMOVED — having both BOMs in dependencyManagement
+	caused class resolution conflicts at runtime because Spring Boot 4's
+	auto-configured ObjectMapper is Jackson 3, which does not recognise
+	com.fasterxml.jackson annotations from a different package hierarchy.
+
+	JJWT (0.12.6) bundles its own Jackson 2 serialiser internally via jjwt-jackson.
+	It does not use the application's ObjectMapper, so there is no conflict.
+	If JJWT Jackson 3 support becomes available, prefer it.
 	-->
 	<dependencyManagement>
 		<dependencies>
@@ -38,17 +73,21 @@
 				<type>pom</type>
 				<scope>import</scope>
 			</dependency>
-			<dependency>
-				<groupId>com.fasterxml.jackson</groupId>
-				<artifactId>jackson-bom</artifactId>
-				<version>2.21.1</version>
-				<type>pom</type>
-				<scope>import</scope>
-			</dependency>
+			<!--
+			com.fasterxml.jackson:jackson-bom REMOVED.
+			Reason: Spring Boot 4 uses Jackson 3 (tools.jackson). Declaring the
+			Jackson 2 BOM alongside the Jackson 3 BOM caused the auto-configured
+			ObjectMapper to receive conflicting version signals and made Jackson 2
+			annotation packages (com.fasterxml.jackson.annotation.*) appear on the
+			classpath alongside Jackson 3. Source files using com.fasterxml annotations
+			(e.g. @JsonFormat, @JsonIgnore) were silently ignored at runtime.
+			-->
 		</dependencies>
 	</dependencyManagement>
 
 	<dependencies>
+
+		<!-- Core Spring Boot starters -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-data-jpa</artifactId>
@@ -65,13 +104,17 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-validation</artifactId>
 		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-oauth2-client</artifactId>
+		</dependency>
 
+		<!-- Database -->
 		<dependency>
 			<groupId>org.postgresql</groupId>
 			<artifactId>postgresql</artifactId>
 			<scope>runtime</scope>
 		</dependency>
-
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-flyway</artifactId>
@@ -82,6 +125,7 @@
 			<scope>runtime</scope>
 		</dependency>
 
+		<!-- Utilities -->
 		<dependency>
 			<groupId>org.projectlombok</groupId>
 			<artifactId>lombok</artifactId>
@@ -102,20 +146,24 @@
 			<artifactId>commons-io</artifactId>
 			<version>2.16.1</version>
 		</dependency>
+
+		<!--
+		Jackson 3 databind — explicitly declared so tools.jackson.annotation.*
+		is available for @JsonFormat, @JsonIgnore, etc. in source files.
+		Version managed by tools.jackson:jackson-bom above.
+		The com.fasterxml.jackson.core:jackson-annotations dep has been REMOVED.
+		All Jackson annotations must now use the tools.jackson.annotation package.
+		-->
 		<dependency>
 			<groupId>tools.jackson.core</groupId>
 			<artifactId>jackson-databind</artifactId>
 		</dependency>
-		<dependency>
-			<groupId>com.fasterxml.jackson.core</groupId>
-			<artifactId>jackson-annotations</artifactId>
-		</dependency>
 
+		<!-- JWT -->
 		<dependency>
 			<groupId>io.jsonwebtoken</groupId>
 			<artifactId>jjwt-api</artifactId>
 			<version>0.12.6</version>
-			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>io.jsonwebtoken</groupId>
@@ -130,6 +178,7 @@
 			<scope>runtime</scope>
 		</dependency>
 
+		<!-- Test -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webmvc-test</artifactId>
@@ -140,7 +189,6 @@
 			<artifactId>spring-security-test</artifactId>
 			<scope>test</scope>
 		</dependency>
-
 		<dependency>
 			<groupId>org.testcontainers</groupId>
 			<artifactId>postgresql</artifactId>
@@ -154,10 +202,6 @@
 			<scope>test</scope>
 		</dependency>
 
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-oauth2-client</artifactId>
-		</dependency>
 	</dependencies>
 
 	<build>
@@ -195,6 +239,13 @@
 				</configuration>
 			</plugin>
 
+			<!--
+			OWASP Dependency Check — run with: mvn dependency-check:check
+			Bound to verify phase so `mvn verify` always includes the scan.
+			Fails build on CVSS >= 7.0. Free NVD API key:
+			https://nvd.nist.gov/developers/request-an-api-key
+			Set as NVD_API_KEY environment variable — never hardcode here.
+			-->
 			<plugin>
 				<groupId>org.owasp</groupId>
 				<artifactId>dependency-check-maven</artifactId>
