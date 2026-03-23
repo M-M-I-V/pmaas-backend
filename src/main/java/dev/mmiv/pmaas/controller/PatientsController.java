@@ -58,7 +58,7 @@ public class PatientsController {
     @GetMapping("/patients/{id}")
     @PreAuthorize("hasAnyRole('MD', 'DMD', 'NURSE')")
     public ResponseEntity<Patients> getPatientById(@PathVariable int id) {
-        // S-17 FIX: service now throws 404 instead of returning null.
+        // Service now throws 404 instead of returning null.
         // No null-check needed here; ResponseStatusException propagates to GlobalExceptionHandler.
         return ResponseEntity.ok(patientsService.getPatientById(id));
     }

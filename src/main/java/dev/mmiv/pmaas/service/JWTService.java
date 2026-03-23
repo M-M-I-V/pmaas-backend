@@ -5,90 +5,148 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
+import java.util.Arrays;
 import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Function;
 
+/**
+ * Handles JWT creation, parsing, and validation for OAuth2-based authentication.
+ * Secret injected from JWT_SECRET env var — never randomly generated.
+ * OAuth2 update:
+ *   - Subject is now the user's email (not a username)
+ *   - Added 'gid' claim (Google stable sub)
+ *   - Added 'jti' claim (JWT ID for replay detection)
+ *   - Added 'iss' claim (our issuer)
+ *   - Reads token from httpOnly cookie, not Authorization header
+ *   - Access token expiry: 15 minutes (was 8 hours — reduced for security)
+ */
 @Service
 public class JWTService {
 
-    /**
-     * Injected from application.properties → jwt.secret → ${JWT_SECRET} env var.
-     * Must be a Base64-encoded string of at least 32 bytes (256 bits) for HmacSHA256.
-     */
+    public static final String ACCESS_TOKEN_COOKIE = "access_token";
+
     @Value("${jwt.secret}")
     private String secretKey;
 
-    /**
-     * Token validity in milliseconds. Default: 8 hours (28,800,000 ms).
-     * Configured via jwt.expiration-ms in application.properties.
-     */
-    @Value("${jwt.expiration-ms:28800000}")
-    private long expirationMs;
+    @Value("${jwt.access-token-expiry-ms:900000}")   // Default: 15 minutes
+    private long accessTokenExpiryMs;
+
+    @Value("${app.issuer:pmaas}")
+    private String issuer;
+
+    // ── Token Generation ──────────────────────────────────────────────────────
 
     /**
-     * Generates a signed JWT for the given user.
-     * Embeds the role claim so the frontend can conditionally render UI.
-     * NOTE: The role in the token is for UI hints only — the server always
-     * re-checks the role from the database on every secured request (via JWTFilter).
+     * Generates a signed access token JWT for an authenticated user.
+     * Claims:
+     *   sub  — user's institutional email (primary, auditable identifier)
+     *   gid  — Google's stable subject ID (survives email changes)
+     *   name — display name (for UI)
+     *   role — application role (UI hint only — server re-validates from DB)
+     *   jti  — UUID, unique per token (enables replay detection / token blacklist)
+     *   iss  — our application issuer
+     *   iat  — issued-at timestamp
+     *   exp  — expiration: now + accessTokenExpiryMs
      */
-    public String generateToken(Users user) {
-        Map<String, Object> claims = new HashMap<>();
-        claims.put("role", user.getRole().name());
-
+    public String generateAccessToken(Users user) {
         return Jwts.builder()
                 .claims()
-                .add(claims)
-                .subject(user.getUsername())
+                .subject(user.getEmail())
+                .add("gid",  user.getGoogleSub())
+                .add("name", user.getName())
+                .add("role", user.getRole().name())
+                .add("jti",  UUID.randomUUID().toString())
+                .add("iss",  issuer)
                 .issuedAt(new Date(System.currentTimeMillis()))
-                .expiration(new Date(System.currentTimeMillis() + expirationMs))
+                .expiration(new Date(System.currentTimeMillis() + accessTokenExpiryMs))
                 .and()
                 .signWith(getKey())
                 .compact();
     }
 
+    // ── Token Extraction from Request ─────────────────────────────────────────
+
     /**
-     * Builds the SecretKey from the injected Base64-encoded secret.
-     * Called on every token operation — the key is derived from the stable
-     * environment variable, so it is consistent across restarts and instances.
+     * Extracts the access token from the request's httpOnly cookie.
+     * Falls back to the Authorization: Bearer header for backward compatibility
+     * with any API clients that cannot use cookies.
+     *
+     * @return the raw JWT string, or empty if not present
      */
-    private SecretKey getKey() {
-        byte[] keyBytes = Decoders.BASE64.decode(secretKey);
-        return Keys.hmacShaKeyFor(keyBytes);
+    public Optional<String> extractTokenFromRequest(HttpServletRequest request) {
+        // Primary: httpOnly cookie
+        if (request.getCookies() != null) {
+            return Arrays.stream(request.getCookies())
+                    .filter(c -> ACCESS_TOKEN_COOKIE.equals(c.getName()))
+                    .map(Cookie::getValue)
+                    .findFirst();
+        }
+        // Fallback: Authorization: Bearer header
+        String header = request.getHeader("Authorization");
+        if (header != null && header.startsWith("Bearer ")) {
+            return Optional.of(header.substring(7));
+        }
+        return Optional.empty();
     }
 
-    public String extractUsername(String token) {
+    // Claim Extraction
+
+    /** Extracts the email (subject) from a token. */
+    public String extractEmail(String token) {
         return extractClaim(token, Claims::getSubject);
     }
 
-    public boolean validateToken(String token, UserDetails userDetails) {
-        final String username = extractUsername(token);
-        return username.equals(userDetails.getUsername()) && !isTokenExpired(token);
+    /** Extracts the jti (JWT ID) — used for token replay detection. */
+    public String extractJti(String token) {
+        return extractClaim(token, claims -> claims.get("jti", String.class));
     }
 
-    private boolean isTokenExpired(String token) {
+    /** Extracts the role claim — for bootstrapping SecurityContext before DB hit. */
+    public String extractRole(String token) {
+        return extractClaim(token, claims -> claims.get("role", String.class));
+    }
+
+    public boolean isTokenExpired(String token) {
         return extractExpiration(token).before(new Date());
+    }
+
+    // Token Validation
+
+    /**
+     * Validates the token against the user's email.
+     * JJWT throws exceptions for signature tampering and expiration —
+     * the caller (JWTFilter) must catch and handle those.
+     */
+    public boolean isTokenValid(String token, String email) {
+        return extractEmail(token).equals(email) && !isTokenExpired(token);
+    }
+
+    // Private helpers
+
+    private SecretKey getKey() {
+        byte[] keyBytes = Decoders.BASE64.decode(secretKey);
+        return Keys.hmacShaKeyFor(keyBytes);
     }
 
     private Date extractExpiration(String token) {
         return extractClaim(token, Claims::getExpiration);
     }
 
-    private <T> T extractClaim(String token, Function<Claims, T> claimsResolver) {
-        return claimsResolver.apply(extractAllClaims(token));
-    }
-
-    private Claims extractAllClaims(String token) {
-        return Jwts.parser()
-                .verifyWith(getKey())
-                .build()
-                .parseSignedClaims(token)
-                .getPayload();
+    private <T> T extractClaim(String token, Function<Claims, T> resolver) {
+        return resolver.apply(
+                Jwts.parser()
+                        .verifyWith(getKey())
+                        .build()
+                        .parseSignedClaims(token)
+                        .getPayload()
+        );
     }
 }

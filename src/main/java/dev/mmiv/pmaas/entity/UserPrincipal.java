@@ -2,6 +2,11 @@ package dev.mmiv.pmaas.entity;
 
 import java.util.Collection;
 import java.util.List;
+
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -19,15 +24,19 @@ import org.springframework.security.core.userdetails.UserDetails;
  *   - isAccountNonLocked is useful for implementing automatic lockout after N
  *     failed login attempts (a future enhancement alongside the Bucket4j rate limiter).
  */
+@Getter
+@RequiredArgsConstructor
 public class UserPrincipal implements UserDetails {
 
+    /**
+     * -- GETTER --
+     *  Exposes the underlying Users entity so controllers and services
+     *  can access the user's ID, email, and other custom fields.
+     */
     private final Users user;
 
-    public UserPrincipal(Users user) {
-        this.user = user;
-    }
-
     @Override
+    @NonNull
     public Collection<? extends GrantedAuthority> getAuthorities() {
         return List.of(
             new SimpleGrantedAuthority("ROLE_" + user.getRole().name())
@@ -35,11 +44,13 @@ public class UserPrincipal implements UserDetails {
     }
 
     @Override
+    @Nullable
     public String getPassword() {
-        return user.getPassword();
+        return null;
     }
 
     @Override
+    @NonNull
     public String getUsername() {
         return user.getUsername();
     }
@@ -61,7 +72,6 @@ public class UserPrincipal implements UserDetails {
     @Override
     public boolean isCredentialsNonExpired() {
         // Credentials do not expire.
-        // Future: add a passwordChangedAt field and return false if > 90 days old.
         return true;
     }
 
