@@ -7,15 +7,14 @@ import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-
-import javax.crypto.SecretKey;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
+import javax.crypto.SecretKey;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
 
 /**
  * Handles JWT creation, parsing, and validation for OAuth2-based authentication.
@@ -36,7 +35,7 @@ public class JWTService {
     @Value("${jwt.secret}")
     private String secretKey;
 
-    @Value("${jwt.access-token-expiry-ms:900000}")   // Default: 15 minutes
+    @Value("${jwt.access-token-expiry-ms:900000}") // Default: 15 minutes
     private long accessTokenExpiryMs;
 
     @Value("${app.issuer:pmaas}")
@@ -58,18 +57,20 @@ public class JWTService {
      */
     public String generateAccessToken(Users user) {
         return Jwts.builder()
-                .claims()
-                .subject(user.getEmail())
-                .add("gid",  user.getGoogleSub())
-                .add("name", user.getName())
-                .add("role", user.getRole().name())
-                .add("jti",  UUID.randomUUID().toString())
-                .add("iss",  issuer)
-                .issuedAt(new Date(System.currentTimeMillis()))
-                .expiration(new Date(System.currentTimeMillis() + accessTokenExpiryMs))
-                .and()
-                .signWith(getKey())
-                .compact();
+            .claims()
+            .subject(user.getEmail())
+            .add("gid", user.getGoogleSub())
+            .add("name", user.getName())
+            .add("role", user.getRole().name())
+            .add("jti", UUID.randomUUID().toString())
+            .add("iss", issuer)
+            .issuedAt(new Date(System.currentTimeMillis()))
+            .expiration(
+                new Date(System.currentTimeMillis() + accessTokenExpiryMs)
+            )
+            .and()
+            .signWith(getKey())
+            .compact();
     }
 
     // ── Token Extraction from Request ─────────────────────────────────────────
@@ -81,19 +82,28 @@ public class JWTService {
      *
      * @return the raw JWT string, or empty if not present
      */
-    public Optional<String> extractTokenFromRequest(HttpServletRequest request) {
+    public Optional<String> extractTokenFromRequest(
+        HttpServletRequest request
+    ) {
         // Primary: httpOnly cookie
         if (request.getCookies() != null) {
-            return Arrays.stream(request.getCookies())
-                    .filter(c -> ACCESS_TOKEN_COOKIE.equals(c.getName()))
-                    .map(Cookie::getValue)
-                    .findFirst();
+            Optional<String> cookieToken = Arrays.stream(request.getCookies())
+                .filter(c -> ACCESS_TOKEN_COOKIE.equals(c.getName()))
+                .map(Cookie::getValue)
+                .findFirst();
+
+            // Only return early if we ACTUALLY found the token
+            if (cookieToken.isPresent()) {
+                return cookieToken;
+            }
         }
+
         // Fallback: Authorization: Bearer header
         String header = request.getHeader("Authorization");
         if (header != null && header.startsWith("Bearer ")) {
             return Optional.of(header.substring(7));
         }
+
         return Optional.empty();
     }
 
@@ -142,11 +152,11 @@ public class JWTService {
 
     private <T> T extractClaim(String token, Function<Claims, T> resolver) {
         return resolver.apply(
-                Jwts.parser()
-                        .verifyWith(getKey())
-                        .build()
-                        .parseSignedClaims(token)
-                        .getPayload()
+            Jwts.parser()
+                .verifyWith(getKey())
+                .build()
+                .parseSignedClaims(token)
+                .getPayload()
         );
     }
 }

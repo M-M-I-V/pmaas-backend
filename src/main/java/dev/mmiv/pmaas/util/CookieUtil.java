@@ -1,6 +1,6 @@
 package dev.mmiv.pmaas.util;
 
-import jakarta.servlet.http.Cookie;
+// import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseCookie;
@@ -24,33 +24,39 @@ import org.springframework.stereotype.Component;
 @Component
 public class CookieUtil {
 
-    private static final String ACCESS_TOKEN_COOKIE  = "access_token";
+    private static final String ACCESS_TOKEN_COOKIE = "access_token";
     private static final String REFRESH_TOKEN_COOKIE = "refresh_token";
 
-    private static final int ACCESS_TOKEN_MAX_AGE_SECONDS  = 900;       // 15 minutes
-    private static final int REFRESH_TOKEN_MAX_AGE_SECONDS = 604_800;   // 7 days
+    private static final int ACCESS_TOKEN_MAX_AGE_SECONDS = 900; // 15 minutes
+    private static final int REFRESH_TOKEN_MAX_AGE_SECONDS = 604_800; // 7 days
 
-    @Value("${app.cookie.secure:true}")
+    @Value("${app.cookie.secure:false}")
     private boolean secureCookie;
 
     // Set cookies
 
-    public void setAccessTokenCookie(HttpServletResponse response, String token) {
+    public void setAccessTokenCookie(
+        HttpServletResponse response,
+        String token
+    ) {
         ResponseCookie cookie = buildCookie(
-                ACCESS_TOKEN_COOKIE,
-                token,
-                "/",
-                ACCESS_TOKEN_MAX_AGE_SECONDS
+            ACCESS_TOKEN_COOKIE,
+            token,
+            "/",
+            ACCESS_TOKEN_MAX_AGE_SECONDS
         );
         response.addHeader("Set-Cookie", cookie.toString());
     }
 
-    public void setRefreshTokenCookie(HttpServletResponse response, String token) {
+    public void setRefreshTokenCookie(
+        HttpServletResponse response,
+        String token
+    ) {
         ResponseCookie cookie = buildCookie(
-                REFRESH_TOKEN_COOKIE,
-                token,
-                "/api/auth/refresh",          // Path-restricted to refresh endpoint only
-                REFRESH_TOKEN_MAX_AGE_SECONDS
+            REFRESH_TOKEN_COOKIE,
+            token,
+            "/api/auth/refresh", // Path-restricted to refresh endpoint only
+            REFRESH_TOKEN_MAX_AGE_SECONDS
         );
         response.addHeader("Set-Cookie", cookie.toString());
     }
@@ -64,29 +70,43 @@ public class CookieUtil {
      * will not delete the cookie.
      */
     public void clearAuthCookies(HttpServletResponse response) {
-        response.addHeader("Set-Cookie", buildClearCookie(ACCESS_TOKEN_COOKIE, "/").toString());
-        response.addHeader("Set-Cookie", buildClearCookie(REFRESH_TOKEN_COOKIE, "/api/auth/refresh").toString());
+        response.addHeader(
+            "Set-Cookie",
+            buildClearCookie(ACCESS_TOKEN_COOKIE, "/").toString()
+        );
+        response.addHeader(
+            "Set-Cookie",
+            buildClearCookie(
+                REFRESH_TOKEN_COOKIE,
+                "/api/auth/refresh"
+            ).toString()
+        );
     }
 
     // Private helpers
 
-    private ResponseCookie buildCookie(String name, String value, String path, int maxAge) {
+    private ResponseCookie buildCookie(
+        String name,
+        String value,
+        String path,
+        int maxAge
+    ) {
         return ResponseCookie.from(name, value)
-                .httpOnly(true)             // JS cannot read this cookie
-                .secure(secureCookie)       // HTTPS only (set app.cookie.secure=false for localhost HTTP)
-                .sameSite("Lax")           // CSRF protection; allows OAuth redirect
-                .path(path)
-                .maxAge(maxAge)
-                .build();
+            .httpOnly(true) // JS cannot read this cookie
+            .secure(secureCookie) // HTTPS only (set app.cookie.secure=false for localhost HTTP)
+            .sameSite("Lax") // CSRF protection; allows OAuth redirect
+            .path(path)
+            .maxAge(maxAge)
+            .build();
     }
 
     private ResponseCookie buildClearCookie(String name, String path) {
         return ResponseCookie.from(name, "")
-                .httpOnly(true)
-                .secure(secureCookie)
-                .sameSite("Lax")
-                .path(path)
-                .maxAge(0)     // MaxAge=0 instructs the browser to delete the cookie
-                .build();
+            .httpOnly(true)
+            .secure(secureCookie)
+            .sameSite("Lax")
+            .path(path)
+            .maxAge(0) // MaxAge=0 instructs the browser to delete the cookie
+            .build();
     }
 }

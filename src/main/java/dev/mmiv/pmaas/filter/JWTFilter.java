@@ -10,6 +10,8 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -17,9 +19,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
-
-import java.io.IOException;
-import java.util.Optional;
 
 /**
  * JWT authentication filter.
@@ -48,10 +47,11 @@ public class JWTFilter extends OncePerRequestFilter {
     private final UsersRepository usersRepository;
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request,
-                                    HttpServletResponse response,
-                                    FilterChain filterChain) throws ServletException, IOException {
-
+    protected void doFilterInternal(
+        HttpServletRequest request,
+        HttpServletResponse response,
+        FilterChain filterChain
+    ) throws ServletException, IOException {
         Optional<String> tokenOpt = jwtService.extractTokenFromRequest(request);
 
         if (tokenOpt.isEmpty()) {
@@ -79,28 +79,39 @@ public class JWTFilter extends OncePerRequestFilter {
             //   3. The role is current (not the potentially stale JWT claim)
             Users user = usersRepository.findByEmail(email).orElse(null);
 
-            if (user != null && user.isEnabled() && !jwtService.isTokenExpired(token)) {
+            if (
+                user != null &&
+                user.isEnabled() &&
+                !jwtService.isTokenExpired(token)
+            ) {
                 UserPrincipal principal = new UserPrincipal(user);
 
                 UsernamePasswordAuthenticationToken authToken =
-                        new UsernamePasswordAuthenticationToken(
-                                principal,
-                                null,
-                                principal.getAuthorities()
-                        );
-                authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                    new UsernamePasswordAuthenticationToken(
+                        principal,
+                        null,
+                        principal.getAuthorities()
+                    );
+                authToken.setDetails(
+                    new WebAuthenticationDetailsSource().buildDetails(request)
+                );
                 SecurityContextHolder.getContext().setAuthentication(authToken);
             }
-
         } catch (ExpiredJwtException ex) {
             // Token is expired — let the request proceed without authentication.
             // Spring Security will return 401, and the frontend interceptor will
             // attempt to refresh the token via /api/auth/refresh.
-            log.debug("Access token expired for request to {}", request.getRequestURI());
-
+            log.warn(
+                "Access token expired for request to {}",
+                request.getRequestURI()
+            );
         } catch (JwtException ex) {
             // Malformed or tampered token — log as a security warning
-            log.warn("Invalid JWT on request to {}: {}", request.getRequestURI(), ex.getMessage());
+            log.warn(
+                "Invalid JWT on request to {}: {}",
+                request.getRequestURI(),
+                ex.getMessage()
+            );
         }
 
         filterChain.doFilter(request, response);
