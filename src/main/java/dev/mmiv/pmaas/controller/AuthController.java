@@ -10,6 +10,8 @@ import dev.mmiv.pmaas.util.CookieUtil;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import java.util.Arrays;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -17,9 +19,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
-
-import java.util.Arrays;
-import java.util.Map;
 
 /**
  * Authentication endpoints.
@@ -54,19 +53,24 @@ public class AuthController {
      */
     @GetMapping("/me")
     public ResponseEntity<UserResponse> getCurrentUser(
-            @AuthenticationPrincipal UserPrincipal principal) {
-
+        @AuthenticationPrincipal UserPrincipal principal
+    ) {
         if (principal == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                    "Not authenticated. Please log in.");
+            throw new ResponseStatusException(
+                HttpStatus.UNAUTHORIZED,
+                "Not authenticated. Please log in."
+            );
         }
 
         Users user = principal.getUser();
-        return ResponseEntity.ok(new UserResponse(
+        return ResponseEntity.ok(
+            new UserResponse(
                 user.getId(),
                 user.getUsername(),
-                user.getRole().name()
-        ));
+                user.getRole().name(),
+                user.isEnabled()
+            )
+        );
     }
 
     // Token refresh
@@ -87,21 +91,23 @@ public class AuthController {
      */
     @PostMapping("/refresh")
     public ResponseEntity<Map<String, String>> refreshToken(
-            HttpServletRequest request,
-            HttpServletResponse response) {
-
+        HttpServletRequest request,
+        HttpServletResponse response
+    ) {
         // Extract the refresh token from its path-restricted cookie
         String rawRefreshToken = extractRefreshTokenCookie(request);
         if (rawRefreshToken == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                    "No refresh token. Please log in again.");
+            throw new ResponseStatusException(
+                HttpStatus.UNAUTHORIZED,
+                "No refresh token. Please log in again."
+            );
         }
 
         // Validate and rotate — throws 401 on any issue (expired, revoked, reuse detected)
         Users user = refreshTokenService.validateAndRotate(rawRefreshToken);
 
         // Issue new tokens
-        String newAccessToken  = jwtService.generateAccessToken(user);
+        String newAccessToken = jwtService.generateAccessToken(user);
         String newRefreshToken = refreshTokenService.createRefreshToken(user);
 
         // Set new cookies (replaces old ones)
@@ -126,9 +132,9 @@ public class AuthController {
      */
     @PostMapping("/logout")
     public ResponseEntity<Map<String, String>> logout(
-            @AuthenticationPrincipal UserPrincipal principal,
-            HttpServletResponse response) {
-
+        @AuthenticationPrincipal UserPrincipal principal,
+        HttpServletResponse response
+    ) {
         if (principal != null) {
             refreshTokenService.revokeAllForUser(principal.getUser());
             log.info("User '{}' logged out", principal.getUser().getEmail());
@@ -143,9 +149,9 @@ public class AuthController {
     private String extractRefreshTokenCookie(HttpServletRequest request) {
         if (request.getCookies() == null) return null;
         return Arrays.stream(request.getCookies())
-                .filter(c -> "refresh_token".equals(c.getName()))
-                .map(Cookie::getValue)
-                .findFirst()
-                .orElse(null);
+            .filter(c -> "refresh_token".equals(c.getName()))
+            .map(Cookie::getValue)
+            .findFirst()
+            .orElse(null);
     }
 }
