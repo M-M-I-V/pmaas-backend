@@ -62,9 +62,8 @@ EXPOSE 8080
 
 # Health check via Spring Boot Actuator.
 # Requires spring-boot-starter-actuator + management.endpoints.web.exposure.include=health
-# Uncomment once actuator is added to pom.xml:
-# HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-#     CMD wget -qO- http://localhost:8080/actuator/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD wget -qO- http://localhost:8080/actuator/health | grep UP || exit 1
 
 ENTRYPOINT ["java", \
     "-Xmx384m", \

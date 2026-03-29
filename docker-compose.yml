@@ -1,28 +1,22 @@
 # docker-compose.yml — Local Development Stack
-# Starts PostgreSQL (and optionally pgAdmin for a GUI) for local development.
+# Starts PostgreSQL for local development.
 # The Spring Boot application itself is run with `mvn spring-boot:run` locally
 # (outside Docker) for fast hot-reload during development.
 #
 # USAGE:
-#   Start the database:         docker-compose up -d postgres
-#   Start database + pgAdmin:   docker-compose up -d
+#   Start the database:         docker-compose up -d
 #   Stop everything:            docker-compose down
 #   Destroy data too:           docker-compose down -v
 #   View logs:                  docker-compose logs -f postgres
+#   Connect via terminal:       psql -h localhost -p 5432 -U <DB_USER> -d <DB_NAME>
 #
 # CREDENTIALS:
 # Provided via the local .env file. Ensure your application-local.yml
 # matches these credentials.
-#
-# pgAdmin web UI:
-#   URL:        http://localhost:5050
-#   Email:      (see PGADMIN_EMAIL in .env)
-#   Password:   (see PGADMIN_PASSWORD in .env)
-#   To connect: register a new server with host=postgres, port=5432
 
 services:
   postgres:
-    image: postgres:17-alpine # Pin major version — never use :latest
+    image: postgres:17-alpine
     container_name: pmaas_postgres
     restart: unless-stopped
     environment:
@@ -30,32 +24,15 @@ services:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
-      - "5432:5432" # Exposed to host so mvn spring-boot:run can connect
+      - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data # Persistent data across restarts
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  pgadmin:
-    image: dpage/pgadmin4:8 # pgAdmin 4 — GUI for PostgreSQL
-    container_name: pmaas_pgadmin
-    restart: unless-stopped
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
-    ports:
-      - "5050:80"
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-    depends_on:
-      postgres:
-        condition: service_healthy
-
 volumes:
   postgres_data:
-    driver: local
-  pgadmin_data:
     driver: local
