@@ -92,7 +92,7 @@ public class CookieUtil {
      *   Required because vercel.app and onrender.com are cross-site.
      *   MUST be paired with Secure=true (set via COOKIE_SECURE=true on Render).
      */
-    @Value("${app.cookie.same-site:Lax}")
+    @Value("${server.servlet.session.cookie.same-site:Lax}")
     private String cookieSameSite;
 
     // ── Set cookies ───────────────────────────────────────────────────────────
