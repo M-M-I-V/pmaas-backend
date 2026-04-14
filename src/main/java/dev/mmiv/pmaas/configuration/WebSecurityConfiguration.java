@@ -6,6 +6,8 @@ import dev.mmiv.pmaas.security.OAuth2LoginFailureHandler;
 import dev.mmiv.pmaas.security.OAuth2LoginSuccessHandler;
 import java.util.Arrays;
 import java.util.List;
+
+import dev.mmiv.pmaas.security.RateLimitFilter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -46,6 +48,7 @@ public class WebSecurityConfiguration {
     private final JwtAuthEntryPoint jwtAuthEntryPoint;
     private final OAuth2LoginSuccessHandler oauth2LoginSuccessHandler;
     private final OAuth2LoginFailureHandler oauth2LoginFailureHandler;
+    private final RateLimitFilter rateLimitFilter;
 
     @Value("${app.cors.allowed-origins:http://localhost:3000}")
     private String allowedOriginsRaw;
@@ -57,12 +60,14 @@ public class WebSecurityConfiguration {
         JWTFilter jwtFilter,
         JwtAuthEntryPoint jwtAuthEntryPoint,
         OAuth2LoginSuccessHandler oauth2LoginSuccessHandler,
-        OAuth2LoginFailureHandler oauth2LoginFailureHandler
+        OAuth2LoginFailureHandler oauth2LoginFailureHandler,
+        RateLimitFilter rateLimitFilter
     ) {
         this.jwtFilter = jwtFilter;
         this.jwtAuthEntryPoint = jwtAuthEntryPoint;
         this.oauth2LoginSuccessHandler = oauth2LoginSuccessHandler;
         this.oauth2LoginFailureHandler = oauth2LoginFailureHandler;
+        this.rateLimitFilter = rateLimitFilter;
     }
 
     @Bean
@@ -132,7 +137,8 @@ public class WebSecurityConfiguration {
             .addFilterBefore(
                 jwtFilter,
                 UsernamePasswordAuthenticationFilter.class
-            );
+            )
+            .addFilterBefore(rateLimitFilter, JWTFilter.class);
 
         return http.build();
     }

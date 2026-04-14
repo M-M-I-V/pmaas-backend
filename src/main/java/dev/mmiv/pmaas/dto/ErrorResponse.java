@@ -46,20 +46,20 @@ import java.time.LocalDateTime;
  * consistent API responses, and reliable client-side parsing.
  */
 public record ErrorResponse(
-        int status,
-        String error,
-        String message,
-        String path,
+    int status,
+    String error,
+    String message,
+    String path,
 
-        @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
-        LocalDateTime timestamp
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
+    LocalDateTime timestamp
 ) {
     /** Convenience factory — avoids repeating LocalDateTime.now() at every call site. */
     public static ErrorResponse of(
-            int status,
-            String error,
-            String message,
-            String path
+        int status,
+        String error,
+        String message,
+        String path
     ) {
         return new ErrorResponse(status, error, message, path, LocalDateTime.now());
     }

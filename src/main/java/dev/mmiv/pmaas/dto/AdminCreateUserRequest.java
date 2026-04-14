@@ -27,30 +27,30 @@ import jakarta.validation.constraints.Pattern;
  */
 public record AdminCreateUserRequest(
 
-        /**
-         * Institutional email address. Must end with @mcst.edu.ph.
-         * This becomes the user's primary identifier and OAuth2 lookup key.
-         */
-        @NotBlank(message = "Email is required")
-        @Email(message = "Email must be a valid email address")
-        @Pattern(
-                regexp = "^[^@]+@mcst\\.edu\\.ph$",
-                message = "Only @mcst.edu.ph email addresses are permitted"
-        )
-        String email,
+    /**
+     * Institutional email address. Must end with @mcst.edu.ph.
+     * This becomes the user's primary identifier and OAuth2 lookup key.
+     */
+    @NotBlank(message = "Email is required")
+    @Email(message = "Email must be a valid email address")
+    @Pattern(
+        regexp = "^[^@]+@mcst\\.edu\\.ph$",
+        message = "Only @mcst.edu.ph email addresses are permitted"
+    )
+    String email,
 
-        /**
-         * Application role. Must be one of: ADMIN, MD, DMD, NURSE.
-         * The Role enum is validated by Spring's binding — an unknown value returns 400.
-         */
-        @NotNull(message = "Role is required")
-        Role role,
+    /**
+     * Application role. Must be one of: ADMIN, MD, DMD, NURSE.
+     * The Role enum is validated by Spring's binding — an unknown value returns 400.
+     */
+    @NotNull(message = "Role is required")
+    Role role,
 
-        /**
-         * Whether the account is active. Defaults to true if not provided.
-         * Set to false to pre-create a disabled account (e.g. for future onboarding).
-         */
-        Boolean enabled
+    /**
+     * Whether the account is active. Defaults to true if not provided.
+     * Set to false to pre-create a disabled account (e.g. for future onboarding).
+     */
+    Boolean enabled
 
 ) {
     /** Returns true unless explicitly set to false. */

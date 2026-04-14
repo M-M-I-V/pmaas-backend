@@ -13,8 +13,8 @@ package dev.mmiv.pmaas.dto;
  * @param expiresAt Unix epoch milliseconds when the token expires.
  */
 public record LoginResponse(
-        String token,
-        String username,
-        String role,
-        long expiresAt
+    String token,
+    String username,
+    String role,
+    long expiresAt
 ) {}
