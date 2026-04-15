@@ -1,14 +1,13 @@
 package dev.mmiv.pmaas.entity;
 
 import jakarta.persistence.*;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-
-import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.List;
 
 @Entity
 @NoArgsConstructor
@@ -61,6 +60,14 @@ public class Patients {
 
     private String remarks;
 
-    @OneToMany(mappedBy = "patient", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OneToMany(
+        mappedBy = "patient",
+        cascade = CascadeType.ALL,
+        orphanRemoval = true
+    )
     private List<Visits> visits = new ArrayList<>();
+
+    public String getName() {
+        return firstName + " " + lastName;
+    }
 }

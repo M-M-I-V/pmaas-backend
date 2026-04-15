@@ -3,8 +3,11 @@ package dev.mmiv.pmaas.service;
 import dev.mmiv.pmaas.entity.InventoryItem;
 import dev.mmiv.pmaas.entity.ItemCategory;
 import dev.mmiv.pmaas.repository.InventoryItemRepository;
-import dev.mmiv.pmaas.service.AuditLogService;
 import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
@@ -18,22 +21,23 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.io.IOException;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.List;
-import java.util.Map;
-
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class InventoryExportService {
 
     private static final String[] HEADERS = {
-            "ID", "Item Name", "Brand Name", "Category",
-            "Description", "Stock on Hand",
-            "Expiration Date", "Date Received", "Remarks",
-            "Created At", "Updated At"
+        "ID",
+        "Item Name",
+        "Brand Name",
+        "Category",
+        "Description",
+        "Stock on Hand",
+        "Expiration Date",
+        "Date Received",
+        "Remarks",
+        "Created At",
+        "Updated At",
     };
 
     private static final int STREAMING_WINDOW = 100;
@@ -43,36 +47,48 @@ public class InventoryExportService {
 
     @Transactional(readOnly = true)
     public void exportToExcel(
-            String q,
-            ItemCategory categoryFilter,
-            HttpServletResponse response
+        String q,
+        ItemCategory categoryFilter,
+        HttpServletResponse response
     ) {
         String exportedBy = SecurityContextHolder.getContext()
-                .getAuthentication().getName();
+            .getAuthentication()
+            .getName();
 
-        String filename = "inventory_export_"
-                + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
-                + ".xlsx";
+        String filename =
+            "inventory_export_" +
+            LocalDateTime.now().format(
+                DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")
+            ) +
+            ".xlsx";
 
         response.setContentType(
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-        response.setHeader("Content-Disposition",
-                "attachment; filename=\"" + filename + "\"");
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        );
+        response.setHeader(
+            "Content-Disposition",
+            "attachment; filename=\"" + filename + "\""
+        );
 
         String normalizedQuery = (q == null || q.isBlank()) ? null : q.trim();
 
         try (SXSSFWorkbook workbook = new SXSSFWorkbook(STREAMING_WINDOW)) {
             workbook.setCompressTempFiles(true);
 
-            CellStyle headerStyle  = buildHeaderStyle(workbook);
-            CellStyle dateStyle    = buildDateStyle(workbook);
+            CellStyle headerStyle = buildHeaderStyle(workbook);
+            CellStyle dateStyle = buildDateStyle(workbook);
 
             int totalExported = 0;
 
             for (ItemCategory category : ItemCategory.values()) {
-                if (categoryFilter != null && categoryFilter != category) continue;
+                if (
+                    categoryFilter != null && categoryFilter != category
+                ) continue;
 
-                List<InventoryItem> items = fetchItems(normalizedQuery, category);
+                List<InventoryItem> items = fetchItems(
+                    normalizedQuery,
+                    category
+                );
                 Sheet sheet = workbook.createSheet(category.name());
 
                 writeHeaderRow(sheet, headerStyle);
@@ -92,27 +108,50 @@ public class InventoryExportService {
             response.flushBuffer();
 
             auditLogService.record(
-                    "Inventory", 0, "EXPORT",
-                    String.format("user=%s | filter-query='%s' | filter-category=%s | exported=%d",
-                            exportedBy, q, categoryFilter, totalExported)
+                "Inventory",
+                0,
+                "EXPORT",
+                String.format(
+                    "user=%s | filter-query='%s' | filter-category=%s | exported=%d",
+                    exportedBy,
+                    q,
+                    categoryFilter,
+                    totalExported
+                )
             );
 
-            log.info("[EXPORT] user='{}' query='{}' category='{}' exported={}",
-                    exportedBy, q, categoryFilter, totalExported);
-
+            log.info(
+                "[EXPORT] user='{}' query='{}' category='{}' exported={}",
+                exportedBy,
+                q,
+                categoryFilter,
+                totalExported
+            );
         } catch (IOException e) {
-            log.error("Export failed for user '{}': {}", exportedBy, e.getMessage());
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
-                    "An error occurred while generating the export file.");
+            log.error(
+                "Export failed for user '{}': {}",
+                exportedBy,
+                e.getMessage()
+            );
+            throw new ResponseStatusException(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "An error occurred while generating the export file."
+            );
         }
     }
 
-    private List<InventoryItem> fetchItems(String query, ItemCategory category) {
+    private List<InventoryItem> fetchItems(
+        String query,
+        ItemCategory category
+    ) {
         if (query == null) {
             return repository.findAllByCategoryOrderByItemNameAsc(category);
         }
-        Pageable all = PageRequest.of(0, Integer.MAX_VALUE,
-                Sort.by(Sort.Direction.ASC, "itemName"));
+        Pageable all = PageRequest.of(
+            0,
+            Integer.MAX_VALUE,
+            Sort.by(Sort.Direction.ASC, "itemName")
+        );
         return repository.search(query, category, all).getContent();
     }
 
@@ -125,28 +164,53 @@ public class InventoryExportService {
         }
     }
 
-    private void writeDataRow(Sheet sheet, int rowIdx, InventoryItem item, CellStyle dateStyle) {
+    private void writeDataRow(
+        Sheet sheet,
+        int rowIdx,
+        InventoryItem item,
+        CellStyle dateStyle
+    ) {
         Row row = sheet.createRow(rowIdx);
         int col = 0;
 
-        row.createCell(col++).setCellValue(item.getId() != null ? item.getId() : 0);
+        row
+            .createCell(col++)
+            .setCellValue(item.getId() != null ? item.getId() : 0);
         row.createCell(col++).setCellValue(nvl(item.getItemName()));
         row.createCell(col++).setCellValue(nvl(item.getBrandName()));
         row.createCell(col++).setCellValue(item.getCategory().name());
         row.createCell(col++).setCellValue(nvl(item.getDescription()));
-        row.createCell(col++).setCellValue(item.getStockOnHand() != null ? item.getStockOnHand() : 0);
+        row
+            .createCell(col++)
+            .setCellValue(
+                item.getStockOnHand() != null ? item.getStockOnHand() : 0
+            );
 
         setDateCell(row.createCell(col++), item.getExpirationDate(), dateStyle);
         setDateCell(row.createCell(col++), item.getDateReceived(), dateStyle);
 
         row.createCell(col++).setCellValue(nvl(item.getRemarks()));
-        row.createCell(col++).setCellValue(
-                item.getCreatedAt() != null ? item.getCreatedAt().toString() : "");
-        row.createCell(col).setCellValue(
-                item.getUpdatedAt() != null ? item.getUpdatedAt().toString() : "");
+        row
+            .createCell(col++)
+            .setCellValue(
+                item.getCreatedAt() != null
+                    ? item.getCreatedAt().toString()
+                    : ""
+            );
+        row
+            .createCell(col)
+            .setCellValue(
+                item.getUpdatedAt() != null
+                    ? item.getUpdatedAt().toString()
+                    : ""
+            );
     }
 
-    private void setDateCell(Cell cell, java.time.LocalDate date, CellStyle style) {
+    private void setDateCell(
+        Cell cell,
+        java.time.LocalDate date,
+        CellStyle style
+    ) {
         if (date != null) {
             cell.setCellValue(date.toString());
         } else {
