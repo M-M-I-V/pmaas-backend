@@ -67,29 +67,29 @@ public class PatientsService {
      * missing patient ID would produce a 500 NullPointerException instead of a
      * meaningful 404 Not Found response.
      */
-    public Patients getPatientById(int id) {
+    public Patients getPatientById(Long id) {
         return patientsRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Patient not found with ID: " + id));
     }
 
-    public void updatePatient(int id, PatientDTO dto) {
+    public void updatePatient(Long id, PatientDTO dto) {
         Patients existing = patientsRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Patient not found with ID: " + id));
         Patients updated = mapDtoToEntity(dto, existing);
         patientsRepository.save(updated);
-        auditLogService.record("Patients", id, "UPDATE", "Patient record updated.");
+        auditLogService.record("Patients", Math.toIntExact(id), "UPDATE", "Patient record updated.");
     }
 
-    public void deletePatient(int id) {
+    public void deletePatient(Long id) {
         if (!patientsRepository.existsById(id)) {
             throw new ResponseStatusException(
                     HttpStatus.NOT_FOUND, "Patient not found with ID: " + id);
         }
         patientsRepository.deleteById(id);
         // Audit DELETE — record the id before the row is gone
-        auditLogService.record("Patients", id, "DELETE", "Patient record deleted.");
+        auditLogService.record("Patients", Math.toIntExact(id), "DELETE", "Patient record deleted.");
     }
 
     // CSV Import

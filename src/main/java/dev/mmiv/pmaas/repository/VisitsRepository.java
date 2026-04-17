@@ -1,72 +1,65 @@
 package dev.mmiv.pmaas.repository;
 
-import dev.mmiv.pmaas.dto.VisitsList;
+import dev.mmiv.pmaas.entity.VisitStatus;
 import dev.mmiv.pmaas.entity.Visits;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import java.time.LocalDate;
-import java.util.List;
+import java.util.Optional;
 
-/**
- * All FUNCTION('MONTH'/'YEAR', ...) calls replaced with EXTRACT().
- * Why this matters:
- *   FUNCTION() is a JPQL escape hatch that delegates to the underlying database's
- *   native function by name. MySQL exposes MONTH() and YEAR(). PostgreSQL does not —
- *   it uses the SQL-standard EXTRACT(MONTH FROM ...) / EXTRACT(YEAR FROM ...) syntax.
- *   Using EXTRACT() here makes every query run correctly on both MySQL (current)
- *   and PostgreSQL (planned migration) without any code change at cutover.
- */
 @Repository
-public interface VisitsRepository extends JpaRepository<Visits, Integer>, JpaSpecificationExecutor<Visits> {
+public interface VisitsRepository extends JpaRepository<Visits, Long> {
 
-    @Query("SELECT COUNT(v) FROM Visits v WHERE v.visitDate = CURRENT_DATE")
-    long countTodayVisits();
-
-    // FUNCTION('MONTH',...) and FUNCTION('YEAR',...)
-    @Query("SELECT COUNT(v) FROM Visits v " +
-            "WHERE EXTRACT(MONTH FROM v.visitDate) = EXTRACT(MONTH FROM CURRENT_DATE) " +
-            "AND EXTRACT(YEAR FROM v.visitDate)  = EXTRACT(YEAR FROM CURRENT_DATE)")
-    long countMonthVisits();
-
-    // same replacement in the GROUP BY aggregation query
-    @Query("SELECT v.diagnosis, COUNT(v) " +
-            "FROM Visits v " +
-            "WHERE EXTRACT(MONTH FROM v.visitDate) = EXTRACT(MONTH FROM CURRENT_DATE) " +
-            "AND EXTRACT(YEAR FROM v.visitDate)  = EXTRACT(YEAR FROM CURRENT_DATE) " +
-            "GROUP BY v.diagnosis " +
-            "ORDER BY COUNT(v) DESC")
-    List<Object[]> countTopDiagnosesThisMonth();
-
-    @Query("SELECT v.visitDate, COUNT(v) " +
-            "FROM Visits v " +
-            "WHERE v.visitDate >= :cutoffDate " +
-            "GROUP BY v.visitDate " +
-            "ORDER BY v.visitDate")
-    List<Object[]> countVisitsTrendLast30Days(@Param("cutoffDate") LocalDate cutoffDate);
-
-    @Query("SELECT v FROM Visits v JOIN FETCH v.patient")
-    List<Visits> findAllWithPatient();
-
+    /**
+     * Fetches a visit with its patient eagerly loaded.
+     * Using JOIN FETCH prevents the N+1 query that would occur if
+     * patient were accessed lazily on a detached entity.
+     */
     @Query("""
-        SELECT new dev.mmiv.pmaas.dto.VisitsList(
-            v.id,
-            CONCAT(p.firstName, ' ', p.lastName),
-            p.birthDate,
-            v.visitDate,
-            CAST(v.visitType AS string),
-            v.chiefComplaint,
-            v.physicalExamFindings,
-            v.diagnosis,
-            v.treatment
-        )
-        FROM Visits v
-        JOIN v.patient p
-        WHERE p.id = :patientId
+        SELECT v FROM Visits v
+        JOIN FETCH v.patient p
+        WHERE v.id = :id
+        """)
+    Optional<Visits> findByIdWithPatient(@Param("id") Long id);
+
+    /**
+     * All visits assigned to a specific MD/DMD, paginated.
+     * Used for role=MD and role=DMD dashboard list views.
+     */
+    @Query("""
+        SELECT v FROM Visits v
+        JOIN FETCH v.patient p
+        WHERE v.assignedToUserId = :userId
         ORDER BY v.visitDate DESC
-    """)
-    List<VisitsList> findVisitsListByPatientId(@Param("patientId") int patientId);
+        """)
+    Page<Visits> findByAssignedToUserId(
+            @Param("userId") Long userId, Pageable pageable);
+
+    /**
+     * All visits in a given status, paginated.
+     * Used by NURSE dashboard to show the queue.
+     */
+    @Query("""
+        SELECT v FROM Visits v
+        JOIN FETCH v.patient p
+        WHERE v.status = :status
+        ORDER BY v.visitDate DESC, v.createdAt DESC
+        """)
+    Page<Visits> findByStatus(
+            @Param("status") VisitStatus status, Pageable pageable);
+
+    /**
+     * All visits for a given patient, paginated.
+     */
+    @Query("""
+        SELECT v FROM Visits v
+        WHERE v.patient.id = :patientId
+        ORDER BY v.visitDate DESC
+        """)
+    Page<Visits> findByPatientId(
+            @Param("patientId") Long patientId, Pageable pageable);
 }

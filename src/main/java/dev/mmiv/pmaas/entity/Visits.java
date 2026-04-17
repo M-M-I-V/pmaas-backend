@@ -1,91 +1,134 @@
 package dev.mmiv.pmaas.entity;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
+import dev.mmiv.pmaas.entity.Patients;
+import dev.mmiv.pmaas.entity.VisitType;
 import jakarta.persistence.*;
-import java.time.LocalDate;
-import lombok.AllArgsConstructor;
 import lombok.Getter;
-import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+
 /**
- * Base entity for all clinic visits. Extended by MedicalVisits and DentalVisits.
+ * Base visit entity — updated with multi-step workflow fields.
  *
- * CODE QUALITY FIX: `respiratoryRate` was declared `public` — the only public
- * instance field on any entity in the project. Changed to private.
+ * ADDED FIELDS (via V8 migration):
+ *   status              — current workflow state
+ *   assignedToUserId    — user ID of the MD/DMD currently assigned
+ *   assignedBy          — username of the nurse who assigned
+ *   assignedAt          — when assignment was made
+ *   completedAt         — when the visit reached COMPLETED
  *
- * JACKSON NOTE:
- * Jackson annotations remain in the {@code com.fasterxml.jackson.annotation}
- * package in both Jackson 2 and Jackson 3. The package name was intentionally
- * preserved by FasterXML to maintain backward compatibility. There is no
- * {@code tools.jackson.annotation} package.
- *
- * SECURITY RISK:
- * If {@code @JsonIgnore} is not properly recognized by the configured
- * ObjectMapper (e.g., due to dependency mismatches or misconfiguration),
- * sensitive entity relationships may be serialized unintentionally.
- *
- * For example, the {@code patient} field could be included in API responses,
- * causing recursive traversal of the entire Patients graph (visits, records,
- * related entities). This may result in:
- *
- * - Unauthorized exposure of Protected Health Information (PHI)
- * - Excessive payload sizes and performance degradation
- * - Potential unbounded recursive serialization
- *
- * This annotation ensures that the field is excluded from JSON output,
- * preserving data privacy, response integrity, and system performance.
+ * Unchanged fields from the original entity are preserved below.
+ * Using JOINED inheritance so medical_visits and dental_visits remain
+ * separate tables with only their type-specific columns.
  */
 @Entity
+@Table(
+        name = "visits",
+        indexes = {
+                @Index(name = "idx_visits_status",               columnList = "status"),
+                @Index(name = "idx_visits_assigned_to_user_id",  columnList = "assigned_to_user_id"),
+                @Index(name = "idx_visits_patient_id",           columnList = "patient_id"),
+                @Index(name = "idx_visits_visit_date",           columnList = "visit_date")
+        }
+)
 @Inheritance(strategy = InheritanceType.JOINED)
-@NoArgsConstructor
-@AllArgsConstructor
-@Setter
+@DiscriminatorColumn(name = "visit_type", discriminatorType = DiscriminatorType.STRING)
 @Getter
+@Setter
 public abstract class Visits {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private int id;
+    private Long id;
 
+    @Column(name = "visit_date", nullable = false)
     private LocalDate visitDate;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "visit_type", insertable = false, updatable = false)
     private VisitType visitType;
 
-    @Column(nullable = false)
-    private String chiefComplaint;
-
-    private Double temperature;
-    private String bloodPressure;
-    private int pulseRate;
-    private int respiratoryRate;
-    private Double spo2;
-
-    @Column(columnDefinition = "TEXT")
-    private String history;
-
-    @Column(columnDefinition = "TEXT")
-    private String physicalExamFindings;
-
-    @Column(columnDefinition = "TEXT")
-    private String diagnosis;
-
-    @Column(columnDefinition = "TEXT")
-    private String plan;
-
-    @Column(columnDefinition = "TEXT")
-    private String treatment;
-
-    @Column(columnDefinition = "TEXT")
-    private String diagnosticTestResult;
-
-    private String diagnosticTestImage;
-
-    // @JsonIgnore uses tools.jackson.annotation (Jackson 3) intentionally.
-    // See class Javadoc for the full explanation of why this matters.
-    @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "patient_id", nullable = false)
     private Patients patient;
+
+    // Common vital sign fields (captured by nurse during CREATED_BY_NURSE)
+
+    @Column(name = "chief_complaint", columnDefinition = "TEXT")
+    private String chiefComplaint;
+
+    @Column(name = "temperature", length = 20)
+    private String temperature;
+
+    @Column(name = "blood_pressure", length = 20)
+    private String bloodPressure;
+
+    @Column(name = "pulse_rate", length = 20)
+    private String pulseRate;
+
+    @Column(name = "respiratory_rate", length = 20)
+    private String respiratoryRate;
+
+    @Column(name = "spo2", length = 20)
+    private String spo2;
+
+    // Workflow fields (added by V8 migration)
+
+    /**
+     * Current workflow status. Defaults to CREATED_BY_NURSE on insert.
+     * Only VisitWorkflowService may change this field.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 50)
+    private VisitStatus status = VisitStatus.CREATED_BY_NURSE;
+
+    /**
+     * User ID of the MD or DMD currently assigned to this visit.
+     * Null until NURSE assigns the visit.
+     */
+    @Column(name = "assigned_to_user_id")
+    private Long assignedToUserId;
+
+    /**
+     * Username of the nurse who performed the assignment.
+     * Preserved even if re-assigned (most recent assignment).
+     */
+    @Column(name = "assigned_by", length = 255)
+    private String assignedBy;
+
+    /** Timestamp of the most recent assignment action. */
+    @Column(name = "assigned_at")
+    private LocalDateTime assignedAt;
+
+    /** Timestamp when the visit transitioned to COMPLETED. */
+    @Column(name = "completed_at")
+    private LocalDateTime completedAt;
+
+    // Audit timestamps
+
+    @Column(name = "created_by", nullable = false, updatable = false, length = 255)
+    private String createdBy;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    @Column(name = "updated_at", nullable = false)
+    private LocalDateTime updatedAt;
+
+    @PrePersist
+    protected void onCreate() {
+        LocalDateTime now = LocalDateTime.now();
+        this.createdAt = now;
+        this.updatedAt = now;
+        if (this.status == null) {
+            this.status = VisitStatus.CREATED_BY_NURSE;
+        }
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        this.updatedAt = LocalDateTime.now();
+    }
 }

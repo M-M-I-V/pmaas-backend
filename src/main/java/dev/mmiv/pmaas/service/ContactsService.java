@@ -129,7 +129,7 @@ public class ContactsService {
         contact.setRespond(request.respond());
 
         if (request.patientId() != null) {
-            Patients patient = patientsRepository.findById(Math.toIntExact(request.patientId()))
+            Patients patient = patientsRepository.findById(request.patientId())
                     .orElseThrow(() -> new ResponseStatusException(
                             HttpStatus.BAD_REQUEST,
                             "Patient with id " + request.patientId() + " not found."));

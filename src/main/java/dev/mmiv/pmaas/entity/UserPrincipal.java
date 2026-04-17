@@ -82,4 +82,8 @@ public class UserPrincipal implements UserDetails {
         // business logic runs. The audit trail for their past actions is preserved.
         return user.isEnabled();
     }
+
+    public int getId() {
+        return user.getId();
+    }
 }

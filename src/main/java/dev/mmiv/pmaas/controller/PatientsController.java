@@ -57,7 +57,7 @@ public class PatientsController {
 
     @GetMapping("/patients/{id}")
     @PreAuthorize("hasAnyRole('MD', 'DMD', 'NURSE')")
-    public ResponseEntity<Patients> getPatientById(@PathVariable int id) {
+    public ResponseEntity<Patients> getPatientById(@PathVariable Long id) {
         // Service now throws 404 instead of returning null.
         // No null-check needed here; ResponseStatusException propagates to GlobalExceptionHandler.
         return ResponseEntity.ok(patientsService.getPatientById(id));
@@ -65,7 +65,7 @@ public class PatientsController {
 
     @PutMapping("/update-patient/{id}")
     @PreAuthorize("hasAnyRole('MD', 'DMD', 'NURSE')")
-    public ResponseEntity<String> updatePatient(@PathVariable int id,
+    public ResponseEntity<String> updatePatient(@PathVariable Long id,
                                                 @Valid @RequestBody PatientDTO dto) {
         patientsService.updatePatient(id, dto);
         return ResponseEntity.ok("Patient updated successfully.");
@@ -73,7 +73,7 @@ public class PatientsController {
 
     @DeleteMapping("/delete-patient/{id}")
     @PreAuthorize("hasAnyRole('MD', 'DMD', 'NURSE')")
-    public ResponseEntity<String> deletePatient(@PathVariable int id) {
+    public ResponseEntity<String> deletePatient(@PathVariable Long id) {
         // ResponseStatusException from the service propagates to GlobalExceptionHandler.
         // No manual try/catch needed.
         patientsService.deletePatient(id);
