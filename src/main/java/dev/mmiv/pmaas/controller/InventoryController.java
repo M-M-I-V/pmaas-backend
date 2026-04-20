@@ -1,8 +1,8 @@
 package dev.mmiv.pmaas.controller;
 
+import dev.mmiv.pmaas.dto.ImportResponse;
 import dev.mmiv.pmaas.dto.InventoryItemRequest;
 import dev.mmiv.pmaas.dto.InventoryItemResponse;
-import dev.mmiv.pmaas.dto.ImportResponse;
 import dev.mmiv.pmaas.entity.ItemCategory;
 import dev.mmiv.pmaas.service.InventoryExportService;
 import dev.mmiv.pmaas.service.InventoryImportService;
@@ -29,22 +29,25 @@ public class InventoryController {
     // Search & Read
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('MD', 'DMD', 'NURSE', 'ADMIN')")
+    @PreAuthorize("hasAnyRole('MD', 'DMD', 'NURSE')")
     public ResponseEntity<Page<InventoryItemResponse>> search(
         @RequestParam(required = false) String q,
         @RequestParam(required = false) ItemCategory category,
-        @RequestParam(defaultValue = "0")        int page,
-        @RequestParam(defaultValue = "20")       int size,
+        @RequestParam(defaultValue = "0") int page,
+        @RequestParam(defaultValue = "20") int size,
         @RequestParam(defaultValue = "itemName") String sortBy,
-        @RequestParam(defaultValue = "asc")      String sortDir
+        @RequestParam(defaultValue = "asc") String sortDir
     ) {
         return ResponseEntity.ok(
-                inventoryService.search(q, category, page, size, sortBy, sortDir));
+            inventoryService.search(q, category, page, size, sortBy, sortDir)
+        );
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('MD', 'DMD', 'NURSE', 'ADMIN')")
-    public ResponseEntity<InventoryItemResponse> getById(@PathVariable Long id) {
+    @PreAuthorize("hasAnyRole('MD', 'DMD', 'NURSE')")
+    public ResponseEntity<InventoryItemResponse> getById(
+        @PathVariable Long id
+    ) {
         return ResponseEntity.ok(inventoryService.getById(id));
     }
 
@@ -55,8 +58,9 @@ public class InventoryController {
     public ResponseEntity<InventoryItemResponse> create(
         @Valid @RequestBody InventoryItemRequest request
     ) {
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(inventoryService.create(request));
+        return ResponseEntity.status(HttpStatus.CREATED).body(
+            inventoryService.create(request)
+        );
     }
 
     @PutMapping("/{id}")
@@ -88,7 +92,7 @@ public class InventoryController {
      * Bucket4j filter if fine-grained per-user throttling is required.
      */
     @PostMapping(value = "/import", consumes = "multipart/form-data")
-    @PreAuthorize("hasAnyRole('MD', 'NURSE')")
+    @PreAuthorize("hasAnyRole('MD', 'DMD', 'NURSE')")
     public ResponseEntity<ImportResponse> importExcel(
         @RequestParam("file") MultipartFile file
     ) {
@@ -103,7 +107,7 @@ public class InventoryController {
      * Returns: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
      */
     @GetMapping("/export")
-    @PreAuthorize("hasAnyRole('MD', 'DMD', 'NURSE', 'ADMIN')")
+    @PreAuthorize("hasAnyRole('MD', 'DMD', 'NURSE')")
     public void exportExcel(
         @RequestParam(required = false) String q,
         @RequestParam(required = false) ItemCategory category,

@@ -53,7 +53,7 @@ public class ContactsController {
      *                    &toDate=2025-12-31&page=0&size=10&sort=contactDate,desc
      */
     @GetMapping
-    @PreAuthorize("hasAnyRole('MD', 'DMD', 'NURSE', 'ADMIN')")
+    @PreAuthorize("hasAnyRole('MD', 'DMD', 'NURSE')")
     public Page<ContactResponse> findAll(
         @ModelAttribute ContactFilterRequest filter,
         @PageableDefault(
@@ -68,7 +68,7 @@ public class ContactsController {
     // GET /api/contacts/{id}
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('MD', 'DMD', 'NURSE', 'ADMIN')")
+    @PreAuthorize("hasAnyRole('MD', 'DMD', 'NURSE')")
     public ContactResponse findById(@PathVariable Long id) {
         return contactsService.findById(id);
     }
