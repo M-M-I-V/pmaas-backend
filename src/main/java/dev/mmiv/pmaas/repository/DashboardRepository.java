@@ -2,11 +2,10 @@ package dev.mmiv.pmaas.repository;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Repository;
-
 import java.time.LocalDate;
 import java.util.List;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Repository;
 
 /**
  * Central analytics repository for the Dashboard module.
@@ -38,10 +37,10 @@ import java.util.List;
 public class DashboardRepository {
 
     private static final String HINT_READ_ONLY = "org.hibernate.readOnly";
-    private static final int    DEFAULT_TOP_N  = 10;
-    private static final int    MIN_STOCK_LEVEL = 10;
-    private static final int    EXPIRY_DAYS     = 60;
-    private static final int    SERIES_DAYS     = 30;
+    private static final int DEFAULT_TOP_N = 10;
+    private static final int MIN_STOCK_LEVEL = 10;
+    private static final int EXPIRY_DAYS = 60;
+    private static final int SERIES_DAYS = 30;
 
     @PersistenceContext
     private EntityManager em;
@@ -61,9 +60,10 @@ public class DashboardRepository {
                                      DATE_TRUNC('month', CURRENT_DATE))                     AS mtd_count
             FROM visits
             """;
-        return (Object[]) em.createNativeQuery(sql)
-                .setHint(HINT_READ_ONLY, "true")
-                .getSingleResult();
+        return (Object[]) em
+            .createNativeQuery(sql)
+            .setHint(HINT_READ_ONLY, "true")
+            .getSingleResult();
     }
 
     /**
@@ -78,9 +78,10 @@ public class DashboardRepository {
             FROM visits
             WHERE DATE_TRUNC('month', visit_date) = DATE_TRUNC('month', CURRENT_DATE)
             """;
-        return (Object[]) em.createNativeQuery(sql)
-                .setHint(HINT_READ_ONLY, "true")
-                .getSingleResult();
+        return (Object[]) em
+            .createNativeQuery(sql)
+            .setHint(HINT_READ_ONLY, "true")
+            .getSingleResult();
     }
 
     /**
@@ -94,29 +95,40 @@ public class DashboardRepository {
             WHERE special_medical_condition IS NOT NULL
                OR communicable_disease      IS NOT NULL
             """;
-        return toLong(em.createNativeQuery(sql)
+        return toLong(
+            em
+                .createNativeQuery(sql)
                 .setHint(HINT_READ_ONLY, "true")
-                .getSingleResult());
+                .getSingleResult()
+        );
     }
 
     /**
      * Count of inventory items with zero stock.
      */
     public Long fetchCriticalInventoryCount() {
-        String sql = "SELECT COUNT(*) FROM inventory_items WHERE stocks_on_hand = 0";
-        return toLong(em.createNativeQuery(sql)
+        String sql =
+            "SELECT COUNT(*) FROM inventory_items WHERE stocks_on_hand = 0";
+        return toLong(
+            em
+                .createNativeQuery(sql)
                 .setHint(HINT_READ_ONLY, "true")
-                .getSingleResult());
+                .getSingleResult()
+        );
     }
 
     /**
      * Count of contact records for today (appointments scheduled today).
      */
     public Long fetchAppointmentsTodayCount() {
-        String sql = "SELECT COUNT(*) FROM contacts WHERE contact_date = CURRENT_DATE";
-        return toLong(em.createNativeQuery(sql)
+        String sql =
+            "SELECT COUNT(*) FROM contacts WHERE contact_date = CURRENT_DATE";
+        return toLong(
+            em
+                .createNativeQuery(sql)
                 .setHint(HINT_READ_ONLY, "true")
-                .getSingleResult());
+                .getSingleResult()
+        );
     }
 
     // CLINICAL ANALYTICS QUERIES
@@ -127,7 +139,10 @@ public class DashboardRepository {
      * Result rows: Object[] { String diagnosis, Long count }
      */
     @SuppressWarnings("unchecked")
-    public List<Object[]> fetchTopDiagnoses(LocalDate startDate, LocalDate endDate) {
+    public List<Object[]> fetchTopDiagnoses(
+        LocalDate startDate,
+        LocalDate endDate
+    ) {
         String sql = """
             SELECT
               diagnosis,
@@ -140,12 +155,13 @@ public class DashboardRepository {
             ORDER BY cnt DESC
             LIMIT :topN
             """;
-        return em.createNativeQuery(sql)
-                .setParameter("startDate", startDate)
-                .setParameter("endDate",   endDate)
-                .setParameter("topN",      DEFAULT_TOP_N)
-                .setHint(HINT_READ_ONLY, "true")
-                .getResultList();
+        return em
+            .createNativeQuery(sql)
+            .setParameter("startDate", startDate)
+            .setParameter("endDate", endDate)
+            .setParameter("topN", DEFAULT_TOP_N)
+            .setHint(HINT_READ_ONLY, "true")
+            .getResultList();
     }
 
     /**
@@ -153,7 +169,10 @@ public class DashboardRepository {
      * Result rows: Object[] { String complaint, Long count }
      */
     @SuppressWarnings("unchecked")
-    public List<Object[]> fetchTopComplaints(LocalDate startDate, LocalDate endDate) {
+    public List<Object[]> fetchTopComplaints(
+        LocalDate startDate,
+        LocalDate endDate
+    ) {
         String sql = """
             SELECT
               chief_complaint,
@@ -166,12 +185,13 @@ public class DashboardRepository {
             ORDER BY cnt DESC
             LIMIT :topN
             """;
-        return em.createNativeQuery(sql)
-                .setParameter("startDate", startDate)
-                .setParameter("endDate",   endDate)
-                .setParameter("topN",      DEFAULT_TOP_N)
-                .setHint(HINT_READ_ONLY, "true")
-                .getResultList();
+        return em
+            .createNativeQuery(sql)
+            .setParameter("startDate", startDate)
+            .setParameter("endDate", endDate)
+            .setParameter("topN", DEFAULT_TOP_N)
+            .setHint(HINT_READ_ONLY, "true")
+            .getResultList();
     }
 
     // PATIENT ACTIVITY QUERIES
@@ -182,7 +202,10 @@ public class DashboardRepository {
      * Result rows: Object[] { String category, Long count }
      */
     @SuppressWarnings("unchecked")
-    public List<Object[]> fetchDemographicsBreakdown(LocalDate startDate, LocalDate endDate) {
+    public List<Object[]> fetchDemographicsBreakdown(
+        LocalDate startDate,
+        LocalDate endDate
+    ) {
         String sql = """
             SELECT
               COALESCE(p.category, 'Unknown') AS category,
@@ -193,11 +216,12 @@ public class DashboardRepository {
             GROUP BY p.category
             ORDER BY cnt DESC
             """;
-        return em.createNativeQuery(sql)
-                .setParameter("startDate", startDate)
-                .setParameter("endDate",   endDate)
-                .setHint(HINT_READ_ONLY, "true")
-                .getResultList();
+        return em
+            .createNativeQuery(sql)
+            .setParameter("startDate", startDate)
+            .setParameter("endDate", endDate)
+            .setHint(HINT_READ_ONLY, "true")
+            .getResultList();
     }
 
     /**
@@ -226,9 +250,10 @@ public class DashboardRepository {
             """.replace(":days", String.valueOf(SERIES_DAYS - 1));
         // Note: generate_series interval literals cannot use JDBC parameters;
         // the constant is a trusted integer — no injection risk.
-        return em.createNativeQuery(sql)
-                .setHint(HINT_READ_ONLY, "true")
-                .getResultList();
+        return em
+            .createNativeQuery(sql)
+            .setHint(HINT_READ_ONLY, "true")
+            .getResultList();
     }
 
     // INVENTORY ANALYTICS QUERIES
@@ -250,10 +275,11 @@ public class DashboardRepository {
             WHERE stocks_on_hand <= COALESCE(minimum_stock_level, :minLevel)
             ORDER BY stocks_on_hand ASC, item_name ASC
             """;
-        return em.createNativeQuery(sql)
-                .setParameter("minLevel", MIN_STOCK_LEVEL)
-                .setHint(HINT_READ_ONLY, "true")
-                .getResultList();
+        return em
+            .createNativeQuery(sql)
+            .setParameter("minLevel", MIN_STOCK_LEVEL)
+            .setHint(HINT_READ_ONLY, "true")
+            .getResultList();
     }
 
     /**
@@ -273,9 +299,10 @@ public class DashboardRepository {
                                       AND CURRENT_DATE + INTERVAL ':days days'
             ORDER BY expiration_date ASC, item_name ASC
             """.replace(":days", String.valueOf(EXPIRY_DAYS));
-        return em.createNativeQuery(sql)
-                .setHint(HINT_READ_ONLY, "true")
-                .getResultList();
+        return em
+            .createNativeQuery(sql)
+            .setHint(HINT_READ_ONLY, "true")
+            .getResultList();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -296,9 +323,10 @@ public class DashboardRepository {
             GROUP BY mode_of_communication
             ORDER BY cnt DESC
             """;
-        return em.createNativeQuery(sql)
-                .setHint(HINT_READ_ONLY, "true")
-                .getResultList();
+        return em
+            .createNativeQuery(sql)
+            .setHint(HINT_READ_ONLY, "true")
+            .getResultList();
     }
 
     /**
@@ -315,9 +343,10 @@ public class DashboardRepository {
             GROUP BY respond
             ORDER BY cnt DESC
             """;
-        return em.createNativeQuery(sql)
-                .setHint(HINT_READ_ONLY, "true")
-                .getResultList();
+        return em
+            .createNativeQuery(sql)
+            .setHint(HINT_READ_ONLY, "true")
+            .getResultList();
     }
 
     /**
@@ -334,9 +363,10 @@ public class DashboardRepository {
      *
      * Result: Object[] { Long scheduledCount, Long completedVisitCount, BigDecimal showRate }
      */
-    public Object[] fetchShowRate(int year, int month) {
+    public List<Object[]> fetchShowRateDaily(int year, int month) {
         String sql = """
             SELECT
+              DATE(c.contact_date)                 AS date,
               COUNT(c.id)                          AS scheduled_count,
               COUNT(v.patient_id)                  AS completed_count,
               CASE
@@ -355,12 +385,15 @@ public class DashboardRepository {
             WHERE c.patient_id IS NOT NULL
               AND EXTRACT(YEAR  FROM c.contact_date) = :year
               AND EXTRACT(MONTH FROM c.contact_date) = :month
+            GROUP BY DATE(c.contact_date)
+            ORDER BY DATE(c.contact_date)
             """;
-        return (Object[]) em.createNativeQuery(sql)
-                .setParameter("year",  year)
-                .setParameter("month", month)
-                .setHint(HINT_READ_ONLY, "true")
-                .getSingleResult();
+        return em
+            .createNativeQuery(sql)
+            .setParameter("year", year)
+            .setParameter("month", month)
+            .setHint(HINT_READ_ONLY, "true")
+            .getResultList();
     }
 
     /**
@@ -383,9 +416,10 @@ public class DashboardRepository {
             GROUP BY d.day
             ORDER BY d.day ASC
             """.replace(":days", String.valueOf(SERIES_DAYS - 1));
-        return em.createNativeQuery(sql)
-                .setHint(HINT_READ_ONLY, "true")
-                .getResultList();
+        return em
+            .createNativeQuery(sql)
+            .setHint(HINT_READ_ONLY, "true")
+            .getResultList();
     }
 
     // Private helpers

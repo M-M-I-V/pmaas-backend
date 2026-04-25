@@ -2,14 +2,13 @@ package dev.mmiv.pmaas.controller;
 
 import dev.mmiv.pmaas.dto.DashboardDTOs.*;
 import dev.mmiv.pmaas.service.DashboardService;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.List;
 
 /**
  * Contacts Analytics Controller — communication, scheduling, and show-rate metrics.
@@ -97,13 +96,13 @@ public class ContactsAnalyticsController {
      * A 0.0 showRatePercentage is returned when scheduledCount = 0,
      * so the frontend always receives a valid numeric value.
      */
-    @GetMapping("/show-rate")
+    @GetMapping("/show-rate-daily")
     @PreAuthorize("hasAnyRole('MD', 'DMD', 'NURSE')")
-    public ShowRateDTO getShowRate(
-            @RequestParam(required = false) Integer year,
-            @RequestParam(required = false) Integer month
+    public List<ShowRateDailyDTO> getShowRateDaily(
+        @RequestParam(required = false) Integer year,
+        @RequestParam(required = false) Integer month
     ) {
-        return dashboardService.getShowRate(year, month);
+        return dashboardService.getShowRateDaily(year, month);
     }
 
     /**

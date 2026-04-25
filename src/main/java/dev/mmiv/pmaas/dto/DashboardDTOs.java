@@ -26,19 +26,13 @@ public final class DashboardDTOs {
      * Returned by a single conditional-aggregation query to avoid
      * hitting the visits table twice per page load.
      */
-    public record TotalVisitsKpiDTO(
-            Long todayCount,
-            Long monthToDateCount
-    ) {}
+    public record TotalVisitsKpiDTO(Long todayCount, Long monthToDateCount) {}
 
     /**
      * Medical vs Dental split for the current month.
      * Used for the visit-type donut chart.
      */
-    public record VisitRatioDTO(
-            Long medicalCount,
-            Long dentalCount
-    ) {}
+    public record VisitRatioDTO(Long medicalCount, Long dentalCount) {}
 
     /**
      * Count of patients flagged with a special medical condition
@@ -66,19 +60,13 @@ public final class DashboardDTOs {
      * in the filtered visit range. Top-10 results are returned.
      * No patient information is included.
      */
-    public record TopDiagnosisDTO(
-            String diagnosis,
-            Long count
-    ) {}
+    public record TopDiagnosisDTO(String diagnosis, Long count) {}
 
     /**
      * A single chief complaint label and its frequency.
      * Top-10 results for the filtered date range.
      */
-    public record TopComplaintDTO(
-            String complaint,
-            Long count
-    ) {}
+    public record TopComplaintDTO(String complaint, Long count) {}
 
     // Patient Activity DTOs
 
@@ -86,20 +74,14 @@ public final class DashboardDTOs {
      * Visit count grouped by patient category (Student / Faculty / Staff).
      * The category field is a classification label, not a PII identifier.
      */
-    public record PatientCategoryCountDTO(
-            String category,
-            Long count
-    ) {}
+    public record PatientCategoryCountDTO(String category, Long count) {}
 
     /**
      * Daily visit count for a single calendar date.
      * Used for 30-day line charts and calendar heatmaps.
      * Zero-count days are included so charts render a complete series.
      */
-    public record DailyVisitVolumeDTO(
-            LocalDate date,
-            Long visitCount
-    ) {}
+    public record DailyVisitVolumeDTO(LocalDate date, Long visitCount) {}
 
     // Inventory Analytics DTOs
 
@@ -108,9 +90,9 @@ public final class DashboardDTOs {
      * Item name and stock figures are operational metadata, not patient data.
      */
     public record LowStockItemDTO(
-            String itemName,
-            Integer stocksOnHand,
-            Integer minimumStockLevel
+        String itemName,
+        Integer stocksOnHand,
+        Integer minimumStockLevel
     ) {}
 
     /**
@@ -118,9 +100,9 @@ public final class DashboardDTOs {
      * Returns item name, expiration date, and remaining stock.
      */
     public record ExpiringItemDTO(
-            String itemName,
-            LocalDate expirationDate,
-            Integer stocksOnHand
+        String itemName,
+        LocalDate expirationDate,
+        Integer stocksOnHand
     ) {}
 
     // Contacts Analytics DTOs
@@ -129,42 +111,35 @@ public final class DashboardDTOs {
      * Count of contact records grouped by mode of communication.
      * The mode label (Phone, SMS, etc.) is a classification, not PII.
      */
-    public record ContactModeDistributionDTO(
-            String mode,
-            Long count
-    ) {}
+    public record ContactModeDistributionDTO(String mode, Long count) {}
 
     /**
      * Count of contact records grouped by response outcome.
      * Used for the respond-status breakdown chart.
      */
-    public record ContactRespondStatusDTO(
-            String status,
-            Long count
-    ) {}
+    public record ContactRespondStatusDTO(String status, Long count) {}
 
     /**
-     * Show rate for a given month.
+     * Show rate for a specific day.
      *
-     * scheduledCount       — contacts with a linked patient in that month.
+     * date                 — the date of the contact/visit.
+     * scheduledCount       — contacts with a linked patient on this date.
      * completedVisitCount  — of those, how many had a matching visit on the same date.
      * showRatePercentage   — completedVisitCount / scheduledCount × 100.
      *
      * Returns 0.0 show rate (not null) when there are no scheduled contacts,
      * so the frontend always receives a valid numeric value.
      */
-    public record ShowRateDTO(
-            Long scheduledCount,
-            Long completedVisitCount,
-            Double showRatePercentage
+    public record ShowRateDailyDTO(
+        LocalDate date,
+        Long scheduledCount,
+        Long completedVisitCount,
+        Double showRatePercentage
     ) {}
 
     /**
      * Appointment (contact) count for a single calendar date.
      * Used for 30-day trend charts. Zero-count days are included.
      */
-    public record DailyAppointmentsDTO(
-            LocalDate date,
-            Long appointmentCount
-    ) {}
+    public record DailyAppointmentsDTO(LocalDate date, Long appointmentCount) {}
 }

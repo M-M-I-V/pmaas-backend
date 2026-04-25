@@ -213,20 +213,29 @@ public class DashboardService {
             .toList();
     }
 
-    public ShowRateDTO getShowRate(Integer year, Integer month) {
+    public List<ShowRateDailyDTO> getShowRateDaily(
+        Integer year,
+        Integer month
+    ) {
         YearMonth ym = resolveYearMonth(year, month);
         long start = now();
-        Object[] row = dashboardRepository.fetchShowRate(
+        List<Object[]> rows = dashboardRepository.fetchShowRateDaily(
             ym.getYear(),
             ym.getMonthValue()
         );
-        logIfSlow("getShowRate", start);
+        logIfSlow("getShowRateDaily", start);
 
-        return new ShowRateDTO(
-            toLong(row[0]),
-            toLong(row[1]),
-            toDouble(row[2])
-        );
+        return rows
+            .stream()
+            .map(row ->
+                new ShowRateDailyDTO(
+                    toLocalDate(row[0]),
+                    toLong(row[1]),
+                    toLong(row[2]),
+                    toDouble(row[3])
+                )
+            )
+            .toList();
     }
 
     public List<DailyAppointmentsDTO> getDailyAppointments() {
