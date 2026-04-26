@@ -30,7 +30,7 @@ import org.springframework.stereotype.Repository;
  *   visits           : id, visit_date, visit_type, diagnosis, chief_complaint, patient_id
  *   patients         : id, category, special_medical_condition, communicable_disease
  *   contacts         : id, contact_date, mode_of_communication, respond, patient_id
- *   inventory_items  : id, item_name, stocks_on_hand, expiration_date, minimum_stock_level
+ *   inventory_items  : id, item_name, stock_on_hand, expiration_date, minimum_stock_level
  */
 @Slf4j
 @Repository
@@ -108,7 +108,7 @@ public class DashboardRepository {
      */
     public Long fetchCriticalInventoryCount() {
         String sql =
-            "SELECT COUNT(*) FROM inventory_items WHERE stocks_on_hand = 0";
+            "SELECT COUNT(*) FROM inventory_items WHERE stock_on_hand = 0";
         return toLong(
             em
                 .createNativeQuery(sql)
@@ -262,18 +262,18 @@ public class DashboardRepository {
      * Items at or below minimum stock level.
      * minimum_stock_level column is used if present; falls back to constant 10
      * via COALESCE so the query is backward-compatible.
-     * Result rows: Object[] { String itemName, Integer stocksOnHand, Integer minLevel }
+     * Result rows: Object[] { String itemName, Integer stockOnHand, Integer minLevel }
      */
     @SuppressWarnings("unchecked")
     public List<Object[]> fetchLowStockItems() {
         String sql = """
             SELECT
               item_name,
-              stocks_on_hand,
+              stock_on_hand,
               COALESCE(minimum_stock_level, :minLevel) AS effective_min
             FROM inventory_items
-            WHERE stocks_on_hand <= COALESCE(minimum_stock_level, :minLevel)
-            ORDER BY stocks_on_hand ASC, item_name ASC
+            WHERE stock_on_hand <= COALESCE(minimum_stock_level, :minLevel)
+            ORDER BY stock_on_hand ASC, item_name ASC
             """;
         return em
             .createNativeQuery(sql)
@@ -284,7 +284,7 @@ public class DashboardRepository {
 
     /**
      * Items expiring within the next N days (default 60).
-     * Result rows: Object[] { String itemName, java.sql.Date expirationDate, Integer stocksOnHand }
+     * Result rows: Object[] { String itemName, java.sql.Date expirationDate, Integer stockOnHand }
      */
     @SuppressWarnings("unchecked")
     public List<Object[]> fetchExpiringItems() {
@@ -292,7 +292,7 @@ public class DashboardRepository {
             SELECT
               item_name,
               expiration_date,
-              stocks_on_hand
+              stock_on_hand
             FROM inventory_items
             WHERE expiration_date IS NOT NULL
               AND expiration_date BETWEEN CURRENT_DATE
