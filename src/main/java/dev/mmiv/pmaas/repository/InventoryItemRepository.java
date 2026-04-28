@@ -25,19 +25,19 @@ public interface InventoryItemRepository
      * the most common single-field search path.
      */
     @Query(
-        """
-        SELECT i FROM InventoryItem i
-        WHERE (:q IS NULL
-               OR LOWER(i.itemName)    LIKE LOWER(CONCAT('%', :q, '%'))
-               OR LOWER(i.brandName)   LIKE LOWER(CONCAT('%', :q, '%'))
-               OR LOWER(i.description) LIKE LOWER(CONCAT('%', :q, '%')))
-        AND (:category IS NULL OR i.category = :category)
-        """
+            """
+            SELECT i FROM InventoryItem i
+            WHERE (:q = ''
+                   OR LOWER(i.itemName)    LIKE LOWER(CONCAT('%', :q, '%'))
+                   OR LOWER(i.brandName)   LIKE LOWER(CONCAT('%', :q, '%'))
+                   OR LOWER(i.description) LIKE LOWER(CONCAT('%', :q, '%')))
+            AND (:category IS NULL OR i.category = :category)
+            """
     )
     Page<InventoryItem> search(
-        @Param("q") String q,
-        @Param("category") ItemCategory category,
-        Pageable pageable
+            @Param("q") String q,
+            @Param("category") ItemCategory category,
+            Pageable pageable
     );
 
     /** Used during Excel import to detect duplicate rows. */

@@ -266,20 +266,23 @@ public class DashboardRepository {
      */
     @SuppressWarnings("unchecked")
     public List<Object[]> fetchLowStockItems() {
+        // minimum_stock_level column does not exist in inventory_items.
+        // Use the module-level constant as both the threshold and the
+        // "effective min" value returned to the caller.
         String sql = """
-            SELECT
-              item_name,
-              stock_on_hand,
-              COALESCE(minimum_stock_level, :minLevel) AS effective_min
-            FROM inventory_items
-            WHERE stock_on_hand <= COALESCE(minimum_stock_level, :minLevel)
-            ORDER BY stock_on_hand ASC, item_name ASC
-            """;
+        SELECT
+          item_name,
+          stock_on_hand,
+          :minLevel AS effective_min
+        FROM inventory_items
+        WHERE stock_on_hand <= :minLevel
+        ORDER BY stock_on_hand ASC, item_name ASC
+        """;
         return em
-            .createNativeQuery(sql)
-            .setParameter("minLevel", MIN_STOCK_LEVEL)
-            .setHint(HINT_READ_ONLY, "true")
-            .getResultList();
+                .createNativeQuery(sql)
+                .setParameter("minLevel", MIN_STOCK_LEVEL)
+                .setHint(HINT_READ_ONLY, "true")
+                .getResultList();
     }
 
     /**

@@ -34,7 +34,7 @@ public class InventoryService {
             String sortBy,
             String sortDir
     ) {
-        String normalizedQuery = (q == null || q.isBlank()) ? null : q.trim();
+        String normalizedQuery = (q == null || q.isBlank()) ? "" : q.trim();
 
         if (!ALLOWED_SORT_FIELDS.contains(sortBy)) {
             sortBy = "itemName";
