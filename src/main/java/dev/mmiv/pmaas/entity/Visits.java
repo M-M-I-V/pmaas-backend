@@ -1,43 +1,73 @@
 package dev.mmiv.pmaas.entity;
 
-import dev.mmiv.pmaas.entity.Patients;
-import dev.mmiv.pmaas.entity.VisitType;
 import jakarta.persistence.*;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import lombok.Getter;
 import lombok.Setter;
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-
 /**
- * Base visit entity — updated with multi-step workflow fields.
+ * Base visit entity — JOINED inheritance strategy.
  *
- * ADDED FIELDS (via V8 migration):
- *   status              — current workflow state
- *   assignedToUserId    — user ID of the MD/DMD currently assigned
- *   assignedBy          — username of the nurse who assigned
- *   assignedAt          — when assignment was made
- *   completedAt         — when the visit reached COMPLETED
+ * V13 SCHEMA CHANGE: Clinical section fields promoted from subtype tables.
  *
- * Unchanged fields from the original entity are preserved below.
- * Using JOINED inheritance so medical_visits and dental_visits remain
- * separate tables with only their type-specific columns.
+ * Previously, fields like history, diagnosis, and plan lived in the
+ * medical_visits and dental_visits subtype tables. This caused a critical
+ * analytics bug: DashboardRepository's native SQL queries against
+ * visits.diagnosis returned NULL for all rows because the column did not
+ * exist on the base visits table.
+ *
+ * The clinical section fields are now in the base visits table so that:
+ *   1. Analytics queries (top diagnoses, top complaints) work correctly.
+ *   2. Both medical and dental workflows use the same field set — MDs fill
+ *      them during PENDING_MD_REVIEW, DMDs fill them during PENDING_DMD_REVIEW.
+ *   3. The JOINED inheritance JOIN query returns a complete record without
+ *      requiring additional subtype JOINs for common clinical data.
+ *
+ * FIELD OWNERSHIP BY STEP:
+ *
+ *   STEP 1 — NURSE (all visit types):
+ *     visitDate, chiefComplaint, temperature, bloodPressure,
+ *     pulseRate, respiratoryRate, spo2, createdBy
+ *
+ *   STEP 2 — NURSE assigns (all visit types):
+ *     status, assignedToUserId, assignedBy, assignedAt
+ *
+ *   STEP 3a — MD completes (MedicalVisits):
+ *     history, physicalExamFindings, diagnosis, plan, treatment,
+ *     diagnosticTestResult, diagnosticTestImage, hama, referralForm
+ *     + MedicalVisits.medicalChartImage
+ *
+ *   STEP 3b — DMD completes (DentalVisits):
+ *     history, diagnosis, plan, treatment, referralForm
+ *     + DentalVisits.toothStatus, DentalVisits.dentalChartImage
+ *
+ *   STEP 4 — NURSE adds note (MedicalVisits only):
+ *     MedicalVisits.nurseNotes → completedAt when first note added
  */
 @Entity
 @Table(
-        name = "visits",
-        indexes = {
-                @Index(name = "idx_visits_status",               columnList = "status"),
-                @Index(name = "idx_visits_assigned_to_user_id",  columnList = "assigned_to_user_id"),
-                @Index(name = "idx_visits_patient_id",           columnList = "patient_id"),
-                @Index(name = "idx_visits_visit_date",           columnList = "visit_date")
-        }
+    name = "visits",
+    indexes = {
+        @Index(name = "idx_visits_status", columnList = "status"),
+        @Index(
+            name = "idx_visits_assigned_to_user_id",
+            columnList = "assigned_to_user_id"
+        ),
+        @Index(name = "idx_visits_patient_id", columnList = "patient_id"),
+        @Index(name = "idx_visits_visit_date", columnList = "visit_date"),
+    }
 )
 @Inheritance(strategy = InheritanceType.JOINED)
-@DiscriminatorColumn(name = "visit_type", discriminatorType = DiscriminatorType.STRING)
+@DiscriminatorColumn(
+    name = "visit_type",
+    discriminatorType = DiscriminatorType.STRING
+)
 @Getter
 @Setter
 public abstract class Visits {
+
+    // ── STEP 1 — NURSE CREATES INITIAL VISIT ────────────────────────────────
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -53,8 +83,6 @@ public abstract class Visits {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "patient_id", nullable = false)
     private Patients patient;
-
-    // Common vital sign fields (captured by nurse during CREATED_BY_NURSE)
 
     @Column(name = "chief_complaint", columnDefinition = "TEXT")
     private String chiefComplaint;
@@ -74,7 +102,7 @@ public abstract class Visits {
     @Column(name = "spo2", length = 20)
     private String spo2;
 
-    // Workflow fields (added by V8 migration)
+    // ── STEP 2 — NURSE ASSIGNS TO MD OR DMD ─────────────────────────────────
 
     /**
      * Current workflow status. Defaults to CREATED_BY_NURSE on insert.
@@ -93,7 +121,7 @@ public abstract class Visits {
 
     /**
      * Username of the nurse who performed the assignment.
-     * Preserved even if re-assigned (most recent assignment).
+     * Preserved even if re-assigned (reflects the most recent assignment).
      */
     @Column(name = "assigned_by", length = 255)
     private String assignedBy;
@@ -106,9 +134,56 @@ public abstract class Visits {
     @Column(name = "completed_at")
     private LocalDateTime completedAt;
 
-    // Audit timestamps
+    // ── STEP 3a/3b — CLINICIAN COMPLETES SECTION ────────────────────────────
+    //
+    // These fields are shared between medical (MD) and dental (DMD) workflows.
+    // Analytics queries (e.g. top diagnoses, top complaints) operate on the
+    // base visits table, which is why these fields live here rather than in
+    // the subtype tables. Promoted from medical_visits/dental_visits by V13.
+    //
+    // For dental visits the field semantics are:
+    //   history               → DMD observations / dental notes
+    //   treatment             → treatment provided by DMD
+    //   physicalExamFindings  → clinical examination findings (optional for DMD)
 
-    @Column(name = "created_by", nullable = false, updatable = false, length = 255)
+    @Column(name = "history", columnDefinition = "TEXT")
+    private String history;
+
+    @Column(name = "physical_exam_findings", columnDefinition = "TEXT")
+    private String physicalExamFindings;
+
+    @Column(name = "diagnosis", columnDefinition = "TEXT")
+    private String diagnosis;
+
+    @Column(name = "plan", columnDefinition = "TEXT")
+    private String plan;
+
+    @Column(name = "treatment", columnDefinition = "TEXT")
+    private String treatment;
+
+    @Column(name = "diagnostic_test_result", columnDefinition = "TEXT")
+    private String diagnosticTestResult;
+
+    /** Blob storage path for diagnostic test image (X-ray, scan, etc.). */
+    @Column(name = "diagnostic_test_image", length = 512)
+    private String diagnosticTestImage;
+
+    /** HAMA assessment data. Primarily used for medical visits. */
+    @Column(name = "hama", columnDefinition = "TEXT")
+    private String hama;
+
+    /** Blob storage path for referral form document. */
+    @Column(name = "referral_form", length = 512)
+    private String referralForm;
+
+    // ── Audit timestamps ─────────────────────────────────────────────────────
+
+    @Column(
+        name = "created_by",
+        nullable = false,
+        updatable = false,
+        length = 255
+    )
     private String createdBy;
 
     @Column(name = "created_at", nullable = false, updatable = false)

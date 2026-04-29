@@ -10,8 +10,29 @@ import lombok.Setter;
  * Dental workflow (2 steps):
  *   CREATED_BY_NURSE → PENDING_DMD_REVIEW → COMPLETED
  *
- * No NurseNote relationship — the dental workflow has no PENDING_NURSE_REVIEW step.
- * All nurse-captured vitals and DMD clinical fields are stored directly here.
+ * Unlike medical visits, dental visits do NOT have a PENDING_NURSE_REVIEW
+ * step and do NOT have nurse notes. The workflow ends when the DMD completes
+ * the dental section.
+ *
+ * V13 CHANGE: The previously dental-specific fields (dentalNotes,
+ * treatmentProvided, toothInvolved, diagnosis, plan, referralForm) were
+ * either promoted to the base Visits entity or merged into tooth_status.
+ *
+ * Field mapping after V13:
+ *   OLD field              → NEW location
+ *   dental_notes           → visits.history         (DMD observations)
+ *   treatment_provided     → visits.treatment        (treatment provided)
+ *   tooth_involved         → dental_visits.tooth_status (merged with V1 column)
+ *   diagnosis, plan        → visits.diagnosis, visits.plan
+ *   referral_form          → visits.referral_form
+ *
+ * To access clinical section data (diagnosis, treatment, history, etc.),
+ * use the inherited getters from Visits: getDiagnosis(), getTreatment(),
+ * getHistory(), getPlan(), getReferralForm(), etc.
+ *
+ * This entity now holds only the fields that are genuinely dental-specific:
+ *   - toothStatus: the tooth or teeth involved in the treatment
+ *   - dentalChartImage: DMD-uploaded dental chart or X-ray image
  */
 @Entity
 @Table(name = "dental_visits")
@@ -21,27 +42,23 @@ import lombok.Setter;
 @Setter
 public class DentalVisits extends Visits {
 
-    // DMD-owned fields (set during PENDING_DMD_REVIEW)
+    // ── STEP 3b — DMD-specific fields ────────────────────────────────────────
+    //
+    // All shared clinical fields (diagnosis, plan, treatment/treatment provided,
+    // history/dental notes, referral form) are inherited from the base Visits
+    // entity and accessed via getDiagnosis(), getTreatment(), getHistory(), etc.
 
-    @Column(name = "dental_notes", columnDefinition = "TEXT")
-    private String dentalNotes;
+    /**
+     * Tooth or teeth involved in the diagnosis and treatment.
+     * Maps to dental_visits.tooth_status (original V1 column, preserved).
+     * In V9 this was called tooth_involved — V13 merged it back into tooth_status.
+     *
+     * Examples: "Upper left molar", "11, 12, 21", "Mandibular incisors"
+     */
+    @Column(name = "tooth_status", length = 500)
+    private String toothStatus;
 
-    @Column(name = "treatment_provided", columnDefinition = "TEXT")
-    private String treatmentProvided;
-
-    @Column(name = "tooth_involved", length = 100)
-    private String toothInvolved;
-
-    @Column(name = "diagnosis", columnDefinition = "TEXT")
-    private String diagnosis;
-
-    @Column(name = "plan", columnDefinition = "TEXT")
-    private String plan;
-
-    @Column(name = "referral_form", length = 512)
-    private String referralForm;
-
-    /** Blob storage path for dental chart / X-ray image. */
+    /** Blob storage path for the DMD-uploaded dental chart or X-ray image. */
     @Column(name = "dental_chart_image", length = 512)
     private String dentalChartImage;
 }

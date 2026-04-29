@@ -23,8 +23,16 @@ import org.springframework.web.server.ResponseStatusException;
 /**
  * Handles in-place editing of visits within the workflow.
  *
- * EDIT RULES — enforced at service level (not just @PreAuthorize, which
- * checks role only; service checks role AND status AND assignment):
+ * V13 CHANGES:
+ *   applyDmdFields: updated to use the base entity setters for clinical section
+ *   fields (history, physicalExamFindings, diagnosis, plan, treatment, referralForm)
+ *   and the DentalVisits setters for dental-specific fields (toothStatus, dentalChartImage).
+ *   Previously referenced dentalNotes, treatmentProvided, toothInvolved which no
+ *   longer exist as fields.
+ *
+ *   toDentalResponse / toMedicalResponse: updated to match the revised DTOs.
+ *
+ * EDIT RULES (enforced at service level):
  *
  *   Medical:
  *     NURSE  + CREATED_BY_NURSE    → edit nurse vitals section
@@ -35,12 +43,6 @@ import org.springframework.web.server.ResponseStatusException;
  *     NURSE  + CREATED_BY_NURSE    → edit nurse vitals section
  *     DMD    + PENDING_DMD_REVIEW  → edit DMD clinical section (must be assigned)
  *     ANY    + COMPLETED           → 400
- *
- * WHY EDITS ARE SEPARATE FROM WORKFLOW COMPLETION STEPS:
- *   Completion steps (complete-md-section, complete-dmd-section) advance the
- *   workflow state. Edits correct mistakes without changing state. A NURSE
- *   who mistyped a temperature can fix it before assigning; an MD can revise
- *   the diagnosis before it transitions to PENDING_NURSE_REVIEW.
  */
 @Slf4j
 @Service
@@ -49,8 +51,11 @@ public class VisitEditService {
 
     private final VisitManagementRepository visitManagementRepository;
     private final AuditLogService auditLogService;
+    private final VisitWorkflowService workflowService;
 
+    // ══════════════════════════════════════════════════════════════════════════
     // MEDICAL VISIT EDIT
+    // ══════════════════════════════════════════════════════════════════════════
 
     @Transactional
     public MedicalVisitResponse editMedicalVisit(
@@ -72,7 +77,6 @@ public class VisitEditService {
 
         VisitStatus status = visit.getStatus();
 
-        // COMPLETED is always read-only
         if (status == VisitStatus.COMPLETED) {
             throw new InvalidStateTransitionException(
                 visitId,
@@ -85,7 +89,6 @@ public class VisitEditService {
             );
         }
 
-        // Apply edits based on role + status
         switch (role) {
             case "ROLE_NURSE" -> {
                 if (status != VisitStatus.CREATED_BY_NURSE) {
@@ -93,9 +96,8 @@ public class VisitEditService {
                         visitId,
                         status,
                         status,
-                        "NURSE can only edit a medical visit in CREATED_BY_NURSE status. " +
-                            "Current status: " +
-                            status.name()
+                        "NURSE can only edit a medical visit in CREATED_BY_NURSE status. Current: " +
+                            status
                     );
                 }
                 applyNurseMedicalFields(visit, req);
@@ -106,9 +108,8 @@ public class VisitEditService {
                         visitId,
                         status,
                         status,
-                        "MD can only edit a medical visit in PENDING_MD_REVIEW status. " +
-                            "Current status: " +
-                            status.name()
+                        "MD can only edit a medical visit in PENDING_MD_REVIEW status. Current: " +
+                            status
                     );
                 }
                 validateAssignment(visit, visitId, userId(auth));
@@ -136,10 +137,12 @@ public class VisitEditService {
             role,
             status
         );
-        return toMedicalResponse(visit);
+        return workflowService.toMedicalResponse(visit);
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
     // DENTAL VISIT EDIT
+    // ══════════════════════════════════════════════════════════════════════════
 
     @Transactional
     public DentalVisitResponse editDentalVisit(
@@ -177,9 +180,8 @@ public class VisitEditService {
                         visitId,
                         status,
                         status,
-                        "NURSE can only edit a dental visit in CREATED_BY_NURSE status. " +
-                            "Current status: " +
-                            status.name()
+                        "NURSE can only edit a dental visit in CREATED_BY_NURSE status. Current: " +
+                            status
                     );
                 }
                 applyNurseDentalFields(visit, req);
@@ -190,9 +192,8 @@ public class VisitEditService {
                         visitId,
                         status,
                         status,
-                        "DMD can only edit a dental visit in PENDING_DMD_REVIEW status. " +
-                            "Current status: " +
-                            status.name()
+                        "DMD can only edit a dental visit in PENDING_DMD_REVIEW status. Current: " +
+                            status
                     );
                 }
                 validateAssignment(visit, visitId, userId(auth));
@@ -220,16 +221,14 @@ public class VisitEditService {
             role,
             status
         );
-        return toDentalResponse(visit);
+        return workflowService.toDentalResponse(visit);
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
     // FIELD APPLICATORS
+    // ══════════════════════════════════════════════════════════════════════════
 
-    /**
-     * Applies only the NURSE-owned vitals to a medical visit.
-     * MD clinical fields in the request are silently ignored — not an error,
-     * since the frontend sends the full payload and the service filters.
-     */
+    /** Applies only NURSE-owned vitals to a medical visit. */
     private void applyNurseMedicalFields(
         MedicalVisits v,
         MedicalVisitEditRequest req
@@ -246,12 +245,15 @@ public class VisitEditService {
             req.respiratoryRate()
         );
         if (req.spo2() != null) v.setSpo2(req.spo2());
-        if (req.weight() != null) v.setWeight(req.weight());
-        if (req.height() != null) v.setHeight(req.height());
     }
 
-    /** Applies only the MD-owned clinical section fields. */
+    /**
+     * Applies MD-owned clinical section fields.
+     * All fields are on the base Visits entity (visits table) after V13,
+     * except medicalChartImage which is on MedicalVisits (medical_visits table).
+     */
     private void applyMdFields(MedicalVisits v, MedicalVisitEditRequest req) {
+        // Base entity (visits table)
         if (req.history() != null) v.setHistory(req.history());
         if (req.physicalExamFindings() != null) v.setPhysicalExamFindings(
             req.physicalExamFindings()
@@ -267,6 +269,7 @@ public class VisitEditService {
         if (req.diagnosticTestImage() != null) v.setDiagnosticTestImage(
             req.diagnosticTestImage()
         );
+        // MedicalVisits-specific (medical_visits table)
         if (req.medicalChartImage() != null) v.setMedicalChartImage(
             req.medicalChartImage()
         );
@@ -287,24 +290,36 @@ public class VisitEditService {
         if (req.pulseRate() != null) v.setPulseRate(req.pulseRate());
     }
 
-    /** Applies only DMD-owned clinical section fields. */
+    /**
+     * Applies DMD-owned clinical section fields.
+     *
+     * V13 MAPPING:
+     *   history, physicalExamFindings, diagnosis, plan, treatment, referralForm
+     *   → all on base Visits entity (visits table)
+     *
+     *   toothStatus, dentalChartImage
+     *   → on DentalVisits entity (dental_visits table)
+     */
     private void applyDmdFields(DentalVisits v, DentalVisitEditRequest req) {
-        if (req.dentalNotes() != null) v.setDentalNotes(req.dentalNotes());
-        if (req.treatmentProvided() != null) v.setTreatmentProvided(
-            req.treatmentProvided()
-        );
-        if (req.toothInvolved() != null) v.setToothInvolved(
-            req.toothInvolved()
+        // Base entity (visits table)
+        if (req.history() != null) v.setHistory(req.history());
+        if (req.physicalExamFindings() != null) v.setPhysicalExamFindings(
+            req.physicalExamFindings()
         );
         if (req.diagnosis() != null) v.setDiagnosis(req.diagnosis());
         if (req.plan() != null) v.setPlan(req.plan());
+        if (req.treatment() != null) v.setTreatment(req.treatment());
         if (req.referralForm() != null) v.setReferralForm(req.referralForm());
+        // DentalVisits-specific (dental_visits table)
+        if (req.toothStatus() != null) v.setToothStatus(req.toothStatus());
         if (req.dentalChartImage() != null) v.setDentalChartImage(
             req.dentalChartImage()
         );
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
     // PRIVATE HELPERS
+    // ══════════════════════════════════════════════════════════════════════════
 
     private Visits loadVisit(Long visitId) {
         return visitManagementRepository
@@ -349,66 +364,6 @@ public class VisitEditService {
         ) return (long) up.getId();
         throw new IllegalStateException(
             "Cannot extract user ID from authentication."
-        );
-    }
-
-    private MedicalVisitResponse toMedicalResponse(MedicalVisits v) {
-        List<NurseNoteResponse> notes = v
-            .getNurseNotes()
-            .stream()
-            .map(NurseNoteResponse::from)
-            .toList();
-        return new MedicalVisitResponse(
-            v.getId(),
-            v.getStatus(),
-            (long) v.getPatient().getId(),
-            v.getPatient().getName(),
-            v.getVisitDate(),
-            v.getChiefComplaint(),
-            v.getTemperature(),
-            v.getBloodPressure(),
-            v.getPulseRate(),
-            v.getRespiratoryRate(),
-            v.getSpo2(),
-            v.getHistory(),
-            v.getPhysicalExamFindings(),
-            v.getDiagnosis(),
-            v.getPlan(),
-            v.getTreatment(),
-            v.getDiagnosticTestResult(),
-            v.getHama(),
-            v.getReferralForm(),
-            notes,
-            v.getCreatedBy(),
-            v.getCreatedAt(),
-            v.getAssignedToUserId(),
-            v.getAssignedAt(),
-            v.getCompletedAt()
-        );
-    }
-
-    private DentalVisitResponse toDentalResponse(DentalVisits v) {
-        return new DentalVisitResponse(
-            v.getId(),
-            v.getStatus(),
-            (long) v.getPatient().getId(),
-            v.getPatient().getName(),
-            v.getVisitDate(),
-            v.getChiefComplaint(),
-            v.getTemperature(),
-            v.getBloodPressure(),
-            v.getPulseRate(),
-            v.getDiagnosis(),
-            v.getDentalNotes(),
-            v.getTreatmentProvided(),
-            v.getToothInvolved(),
-            v.getPlan(),
-            v.getReferralForm(),
-            v.getCreatedBy(),
-            v.getCreatedAt(),
-            v.getAssignedToUserId(),
-            v.getAssignedAt(),
-            v.getCompletedAt()
         );
     }
 }

@@ -22,35 +22,23 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * CSV import and export for visits, updated for the V8 workflow schema.
+ * CSV import and export for visits, updated for the V13 schema.
  *
- * KEY CHANGES FROM OLD VisitsService:
+ * V13 CHANGES FROM V8:
+ *   All shared clinical fields (history, physicalExamFindings, diagnosis, plan,
+ *   treatment, diagnosticTestResult, diagnosticTestImage, hama, referralForm)
+ *   are now in the base Visits entity. Import sets them via the inherited
+ *   setters; export reads them from the base entity directly.
  *
- * 1. nursesNotes TEXT column is GONE.
- *    - Import: if the "Nurse Notes" CSV column has content, a NurseNote entity
- *      is created and persisted. Historical imported visits are set to COMPLETED
- *      so the workflow machinery does not interfere with them.
- *    - Export: nurse notes are fetched from the NurseNote relationship and
- *      joined with " | " as a separator so the round-trip is lossless.
+ *   Dental field mapping:
+ *     H_HISTORY     → visits.history       (was dental_visits.dental_notes)
+ *     H_TREATMENT   → visits.treatment     (was dental_visits.treatment_provided)
+ *     H_TOOTH_STATUS → dental_visits.tooth_status (renamed from tooth_involved)
  *
- * 2. Vitals are now String, not Double/int.
- *    - temperature, spo2: were Double → now String (no parsing, just store raw)
- *    - pulseRate, respiratoryRate: were int → now String
- *    - This is backward-compatible: old CSVs with "72" in the Pulse Rate column
- *      still import correctly as the string "72".
- *
- * 3. visitType is a JPA discriminator (insertable=false, updatable=false).
- *    - We do NOT call visit.setVisitType() — Hibernate sets the discriminator
- *      column automatically from @DiscriminatorValue.
- *
- * 4. Export uses Apache Commons CSVPrinter instead of writer.printf.
- *    - The old printf approach was broken for medical data fields containing
- *      commas (e.g., "Hypertension, Stage 1" produced extra columns).
- *    - CSVPrinter quotes any value containing commas, newlines, or quotes,
- *      and the import-side CSVParser handles them correctly.
- *
- * 5. Imported visits get status=COMPLETED and createdBy="import" so they
- *    don't appear as open workflow items in the nurse/MD queues.
+ *   H_DENTAL_NOTES / H_TREATMENT_PROVIDED / H_TOOTH_INVOLVED columns are
+ *   kept in the CSV header for backward compatibility with old exports, but
+ *   are not used during import (the canonical columns are used instead).
+ *   During export they are omitted — the canonical columns carry the data.
  */
 @Slf4j
 @Service
@@ -61,20 +49,24 @@ public class VisitImportExportService {
     private final NurseNoteRepository nurseNoteRepository;
     private final PatientsRepository patientsRepository;
 
-    // Header constants — MUST stay in sync between import and export
-    // Changing a header name here is a breaking change for any stored CSV files.
+    // ── Header constants ─────────────────────────────────────────────────────
+    // CHANGING A HEADER NAME IS A BREAKING CHANGE for stored CSV files.
+
     private static final String H_PATIENT_ID = "Patient ID";
+    private static final String H_PATIENT_NAME = "Patient Name";
     private static final String H_VISIT_DATE = "Visit Date";
     private static final String H_VISIT_TYPE = "Visit Type";
+    private static final String H_STATUS = "Status";
     private static final String H_CHIEF_COMPLAINT = "Chief Complaint";
-    private static final String H_DIAGNOSIS = "Diagnosis";
     private static final String H_TEMPERATURE = "Temperature";
     private static final String H_BLOOD_PRESSURE = "Blood Pressure";
     private static final String H_PULSE_RATE = "Pulse Rate";
     private static final String H_RESP_RATE = "Respiratory Rate";
     private static final String H_SPO2 = "SPO2";
+    // Shared clinical section (base entity after V13)
     private static final String H_HISTORY = "History";
     private static final String H_EXAM_FINDINGS = "Physical Exam Findings";
+    private static final String H_DIAGNOSIS = "Diagnosis";
     private static final String H_PLAN = "Plan";
     private static final String H_TREATMENT = "Treatment";
     private static final String H_NURSE_NOTES = "Nurse Notes";
@@ -82,18 +74,18 @@ public class VisitImportExportService {
     private static final String H_REFERRAL = "Referral Form";
     private static final String H_DIAG_RESULT = "Diagnostic Test Result";
     private static final String H_DIAG_IMAGE = "Diagnostic Test Image";
+    // Medical-specific
+    private static final String H_MEDICAL_CHART = "Medical Chart Image";
     // Dental-specific
-    private static final String H_DENTAL_NOTES = "Dental Notes";
-    private static final String H_TREATMENT_PROVIDED = "Treatment Provided";
-    private static final String H_TOOTH_INVOLVED = "Tooth Involved";
-    // Read-only in export, not imported
-    private static final String H_PATIENT_NAME = "Patient Name";
-    private static final String H_STATUS = "Status";
+    private static final String H_TOOTH_STATUS = "Tooth Status";
+    private static final String H_DENTAL_CHART = "Dental Chart Image";
 
     private static final String IMPORT_BY = "import";
     private static final String NOTE_SEPARATOR = " | ";
 
+    // ══════════════════════════════════════════════════════════════════════════
     // IMPORT
+    // ══════════════════════════════════════════════════════════════════════════
 
     @Transactional
     public void importVisits(MultipartFile file) throws IOException {
@@ -124,9 +116,8 @@ public class VisitImportExportService {
     }
 
     private void importRow(CSVRecord rec) {
-        long rowNum = rec.getRecordNumber() + 1; // +1 for header row offset
+        long rowNum = rec.getRecordNumber() + 1;
 
-        // ── Resolve patient ───────────────────────────────────────────────────
         Long patientId = parseLongSafe(rec.get(H_PATIENT_ID));
         if (patientId == null) {
             throw new ResponseStatusException(
@@ -148,7 +139,6 @@ public class VisitImportExportService {
                 )
             );
 
-        // Determine visit type
         String typeRaw = rec.get(H_VISIT_TYPE);
         VisitType visitType;
         try {
@@ -164,7 +154,6 @@ public class VisitImportExportService {
             );
         }
 
-        // Build the correct subtype
         if (visitType == VisitType.MEDICAL) {
             importMedicalRow(rec, patient, rowNum);
         } else {
@@ -180,17 +169,15 @@ public class VisitImportExportService {
         MedicalVisits visit = new MedicalVisits();
         applyBaseFields(visit, rec, patient);
 
-        // Nurse-owned vitals
+        // Nurse vitals (base entity)
         visit.setChiefComplaint(blankToNull(rec.get(H_CHIEF_COMPLAINT)));
         visit.setTemperature(blankToNull(rec.get(H_TEMPERATURE)));
         visit.setBloodPressure(blankToNull(rec.get(H_BLOOD_PRESSURE)));
         visit.setPulseRate(blankToNull(rec.get(H_PULSE_RATE)));
         visit.setRespiratoryRate(blankToNull(rec.get(H_RESP_RATE)));
         visit.setSpo2(blankToNull(rec.get(H_SPO2)));
-        visit.setWeight(blankToNull(rec.get("weight"))); // May not exist in old exports
-        visit.setHeight(blankToNull(rec.get("height"))); // May not exist in old exports
 
-        // Medical-specific fields
+        // Shared clinical section — all on base entity after V13
         visit.setHistory(blankToNull(rec.get(H_HISTORY)));
         visit.setPhysicalExamFindings(blankToNull(rec.get(H_EXAM_FINDINGS)));
         visit.setDiagnosis(blankToNull(rec.get(H_DIAGNOSIS)));
@@ -200,15 +187,16 @@ public class VisitImportExportService {
         visit.setDiagnosticTestImage(blankToNull(rec.get(H_DIAG_IMAGE)));
         visit.setHama(blankToNull(rec.get(H_HAMA)));
         visit.setReferralForm(blankToNull(rec.get(H_REFERRAL)));
+        // Medical-specific
+        visit.setMedicalChartImage(
+            blankToNull(getOptionalColumn(rec, H_MEDICAL_CHART))
+        );
 
         MedicalVisits saved = (MedicalVisits) visitManagementRepository.save(
             visit
         );
 
-        // NurseNote: nursesNotes TEXT is gone, create NurseNote entity
-        // The old "Nurse Notes" CSV column now creates an immutable NurseNote.
-        // Notes from different authors are separated by " | " in the CSV cell —
-        // on import they are stored as a single combined note.
+        // NurseNote: create NurseNote entity from the Nurse Notes column
         String rawNotes = blankToNull(rec.get(H_NURSE_NOTES));
         if (rawNotes != null) {
             NurseNote note = new NurseNote(saved, rawNotes, IMPORT_BY);
@@ -224,38 +212,34 @@ public class VisitImportExportService {
         DentalVisits visit = new DentalVisits();
         applyBaseFields(visit, rec, patient);
 
-        // Nurse-owned vitals
+        // Nurse vitals (base entity)
         visit.setChiefComplaint(blankToNull(rec.get(H_CHIEF_COMPLAINT)));
         visit.setTemperature(blankToNull(rec.get(H_TEMPERATURE)));
         visit.setBloodPressure(blankToNull(rec.get(H_BLOOD_PRESSURE)));
         visit.setPulseRate(blankToNull(rec.get(H_PULSE_RATE)));
 
-        // DMD-owned fields
+        // Shared clinical section — all on base entity after V13
+        visit.setHistory(blankToNull(rec.get(H_HISTORY)));
+        visit.setPhysicalExamFindings(blankToNull(rec.get(H_EXAM_FINDINGS)));
         visit.setDiagnosis(blankToNull(rec.get(H_DIAGNOSIS)));
-        visit.setDentalNotes(
-            blankToNull(getOptionalColumn(rec, H_DENTAL_NOTES))
-        );
-        visit.setTreatmentProvided(
-            blankToNull(getOptionalColumn(rec, H_TREATMENT_PROVIDED))
-        );
-        visit.setToothInvolved(
-            blankToNull(getOptionalColumn(rec, H_TOOTH_INVOLVED))
-        );
         visit.setPlan(blankToNull(rec.get(H_PLAN)));
+        visit.setTreatment(blankToNull(rec.get(H_TREATMENT)));
         visit.setReferralForm(blankToNull(rec.get(H_REFERRAL)));
+
+        // Dental-specific
+        visit.setToothStatus(
+            blankToNull(getOptionalColumn(rec, H_TOOTH_STATUS))
+        );
+        visit.setDentalChartImage(
+            blankToNull(getOptionalColumn(rec, H_DENTAL_CHART))
+        );
 
         visitManagementRepository.save(visit);
     }
 
     /**
-     * Applies fields common to both MedicalVisits and DentalVisits.
-     *
-     * NOTE: do NOT call visit.setVisitType() — it is a discriminator column
-     * marked insertable=false, updatable=false. Hibernate sets it automatically
-     * from the @DiscriminatorValue on MedicalVisits / DentalVisits.
-     *
-     * Imported visits are set to COMPLETED so they don't pollute the active
-     * workflow queues (nurse assignment list, MD pending list).
+     * Applies fields common to both visit types.
+     * Imported visits are always COMPLETED so they don't pollute workflow queues.
      */
     private void applyBaseFields(
         Visits visit,
@@ -269,22 +253,10 @@ public class VisitImportExportService {
         visit.setCompletedAt(LocalDateTime.now());
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
     // EXPORT
+    // ══════════════════════════════════════════════════════════════════════════
 
-    /**
-     * Exports all visits to CSV using Apache Commons CSVPrinter.
-     *
-     * WHY NOT writer.printf():
-     *   The old export used writer.printf with raw commas between fields. Any
-     *   medical text field containing a comma (diagnosis: "Hypertension, Stage 1")
-     *   would produce an extra column, breaking the CSV structure. CSVPrinter
-     *   handles quoting automatically — a value containing a comma is wrapped
-     *   in double quotes, and the import-side CSVParser unwraps it correctly.
-     *
-     * Nurse notes: all notes for a medical visit are joined with " | " into a
-     * single CSV cell. On re-import they are stored as one combined note. This
-     * preserves the content while keeping the CSV single-row-per-visit format.
-     */
     @Transactional(readOnly = true)
     public void exportVisits(HttpServletResponse response) throws IOException {
         List<Visits> visits = visitManagementRepository.findAllWithPatient();
@@ -295,7 +267,7 @@ public class VisitImportExportService {
             "attachment; filename=\"visits.csv\""
         );
 
-        // Write BOM so Excel opens UTF-8 CSVs with correct encoding automatically
+        // BOM for Excel UTF-8 compatibility
         OutputStream out = response.getOutputStream();
         out.write(new byte[] { (byte) 0xEF, (byte) 0xBB, (byte) 0xBF });
 
@@ -322,9 +294,9 @@ public class VisitImportExportService {
                 H_REFERRAL,
                 H_DIAG_RESULT,
                 H_DIAG_IMAGE,
-                H_DENTAL_NOTES,
-                H_TREATMENT_PROVIDED,
-                H_TOOTH_INVOLVED
+                H_MEDICAL_CHART,
+                H_TOOTH_STATUS,
+                H_DENTAL_CHART
             )
             .build();
 
@@ -350,93 +322,57 @@ public class VisitImportExportService {
             v.getPatient() != null ? buildFullName(v.getPatient()) : "";
 
         // Subtype-specific fields
-        String chiefComplaint = null;
-        String temperature = null,
-            bloodPressure = null;
-        String pulseRate = null,
-            respiratoryRate = null,
-            spo2 = null;
-        String history = null,
-            physicalExam = null;
-        String diagnosis = null,
-            plan = null;
-        String treatment = null,
-            nurseNotes = null;
-        String hama = null,
-            referralForm = null;
-        String diagResult = null,
-            diagImage = null;
-        String dentalNotes = null,
-            treatmentProvided = null,
-            toothInvolved = null;
+        String medicalChart = null;
+        String nurseNotes = null;
+        String toothStatus = null;
+        String dentalChart = null;
 
         if (v instanceof MedicalVisits m) {
-            chiefComplaint = m.getChiefComplaint();
-            temperature = m.getTemperature();
-            bloodPressure = m.getBloodPressure();
-            pulseRate = m.getPulseRate();
-            respiratoryRate = m.getRespiratoryRate();
-            spo2 = m.getSpo2();
-            history = m.getHistory();
-            physicalExam = m.getPhysicalExamFindings();
-            diagnosis = m.getDiagnosis();
-            plan = m.getPlan();
-            treatment = m.getTreatment();
-            hama = m.getHama();
-            referralForm = m.getReferralForm();
-            diagResult = m.getDiagnosticTestResult();
-            diagImage = m.getDiagnosticTestImage();
-            // Join all nurse notes with a separator — CSVPrinter handles quoting
+            medicalChart = m.getMedicalChartImage();
+            // Join nurse notes with separator; CSVPrinter handles quoting for commas
             nurseNotes = m.getNurseNotes().isEmpty()
                 ? null
                 : m
                       .getNurseNotes()
                       .stream()
-                      .map(n -> n.getContent())
+                      .map(NurseNote::getContent)
                       .reduce((a, b) -> a + NOTE_SEPARATOR + b)
                       .orElse(null);
         } else if (v instanceof DentalVisits d) {
-            chiefComplaint = d.getChiefComplaint();
-            temperature = d.getTemperature();
-            bloodPressure = d.getBloodPressure();
-            pulseRate = d.getPulseRate();
-            diagnosis = d.getDiagnosis();
-            plan = d.getPlan();
-            referralForm = d.getReferralForm();
-            dentalNotes = d.getDentalNotes();
-            treatmentProvided = d.getTreatmentProvided();
-            toothInvolved = d.getToothInvolved();
+            toothStatus = d.getToothStatus();
+            dentalChart = d.getDentalChartImage();
         }
 
+        // All shared clinical fields come from the base entity after V13
         csv.printRecord(
             patientId,
             patientName,
             v.getVisitDate() != null ? v.getVisitDate().toString() : "",
             v.getVisitType() != null ? v.getVisitType().name() : "",
             v.getStatus() != null ? v.getStatus().name() : "",
-            chiefComplaint,
-            temperature,
-            bloodPressure,
-            pulseRate,
-            respiratoryRate,
-            spo2,
-            history,
-            physicalExam,
-            diagnosis,
-            plan,
-            treatment,
+            v.getChiefComplaint(),
+            v.getTemperature(),
+            v.getBloodPressure(),
+            v.getPulseRate(),
+            v.getRespiratoryRate(),
+            v.getSpo2(),
+            v.getHistory(),
+            v.getPhysicalExamFindings(),
+            v.getDiagnosis(),
+            v.getPlan(),
+            v.getTreatment(),
             nurseNotes,
-            hama,
-            referralForm,
-            diagResult,
-            diagImage,
-            dentalNotes,
-            treatmentProvided,
-            toothInvolved
+            v.getHama(),
+            v.getReferralForm(),
+            v.getDiagnosticTestResult(),
+            v.getDiagnosticTestImage(),
+            medicalChart,
+            toothStatus,
+            dentalChart
         );
     }
 
-    // HELPERS
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private void validateImportFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
@@ -487,20 +423,10 @@ public class VisitImportExportService {
         }
     }
 
-    /**
-     * Returns null for blank strings so JPA stores NULL in the database
-     * instead of an empty string, which is consistent with how the workflow
-     * steps set these fields.
-     */
     private String blankToNull(String value) {
         return (value == null || value.isBlank()) ? null : value;
     }
 
-    /**
-     * Reads an optional column — returns empty string if the column
-     * header does not exist in the CSV (for backward compatibility
-     * with CSVs exported before dental-specific columns were added).
-     */
     private String getOptionalColumn(CSVRecord rec, String header) {
         try {
             return rec.get(header);

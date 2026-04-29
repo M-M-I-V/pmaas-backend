@@ -9,6 +9,8 @@ import dev.mmiv.pmaas.service.VisitEditService;
 import dev.mmiv.pmaas.service.VisitImportExportService;
 import dev.mmiv.pmaas.service.VisitReadService;
 import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -17,46 +19,45 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
-import java.util.List;
-
 /**
  * Visit management endpoints — list, edit, import, export.
  *
- * These endpoints complement the workflow state machine in VisitController.
+ * These endpoints complement the workflow state machine in VisitsController.
  * They are read/write operations that do NOT advance the workflow status
- * (except implicitly during import, where all imported visits are COMPLETED).
+ * (except during import, where all imported visits are set to COMPLETED).
  *
  * BASE PATH: /api (preserved from old VisitsController for frontend compatibility)
  *
  * PERMISSION SUMMARY:
- *   List endpoints:   NURSE, MD, DMD   (ADMIN excluded — no visit data access)
+ *   List endpoints:   NURSE, MD, DMD   (ADMIN excluded)
  *   Edit endpoints:   NURSE, MD, DMD   (service enforces status+assignment rules)
  *   Import:           NURSE, MD, DMD   (historical data migration)
  *   Export:           NURSE, MD, DMD
  *
- * ADMIN EXCLUSION:
- *   No endpoint here includes ADMIN in @PreAuthorize. ADMIN manages user
- *   accounts and system configuration — not pmaasal visit records.
+ * DELETION: No DELETE endpoint exists. Visits are immutable once created.
+ * Any edit to a completed visit is rejected by VisitEditService (400).
+ * Audit logs are recorded for all edits.
  */
 @RestController
 @RequestMapping("/api")
 @RequiredArgsConstructor
 public class VisitManagementController {
 
-    private final VisitReadService          readService;
-    private final VisitEditService          editService;
-    private final VisitImportExportService  importExportService;
+    private final VisitReadService readService;
+    private final VisitEditService editService;
+    private final VisitImportExportService importExportService;
 
-    // LIST ENDPOINTS (preserved from old VisitsController)
+    // ══════════════════════════════════════════════════════════════════════════
+    // LIST ENDPOINTS
+    // ══════════════════════════════════════════════════════════════════════════
 
     /**
      * GET /api/visits-list
      *
-     * All visits, ordered by visitDate descending.
+     * All visits ordered by visitDate descending.
      * Used by the /visits page visits table.
      *
-     * Response includes the new `status` field so the frontend can show
+     * The response includes the `status` field so the frontend can show
      * workflow state badges and conditionally enable/disable action buttons.
      *
      * Example response item:
@@ -88,66 +89,64 @@ public class VisitManagementController {
     @GetMapping("/visits-list/patient/{id}")
     @PreAuthorize("hasAnyRole('NURSE', 'MD', 'DMD')")
     public ResponseEntity<List<VisitsList>> getVisitsListByPatient(
-            @PathVariable Long id
+        @PathVariable Long id
     ) {
         return ResponseEntity.ok(readService.getVisitsListByPatientId(id));
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
     // EDIT ENDPOINTS
+    // ══════════════════════════════════════════════════════════════════════════
 
     /**
      * PUT /api/visits/medical/{id}/edit
      *
-     * Edits a medical visit in-place without advancing the workflow state.
+     * Edits a medical visit in-place without advancing the workflow status.
      *
-     * Which fields are actually applied depends on the caller's role and the
-     * visit's current status — the service enforces this silently:
-     *   NURSE  + CREATED_BY_NURSE   → updates vitals and chief complaint
-     *   MD     + PENDING_MD_REVIEW  → updates pmaasal section (must be assigned)
+     * Which fields are applied depends on the caller's role and the visit's
+     * current status — VisitEditService enforces this:
+     *   NURSE  + CREATED_BY_NURSE   → vitals and chief complaint
+     *   MD     + PENDING_MD_REVIEW  → clinical section (must be assigned)
      *   COMPLETED visits            → 400 Bad Request
      *
-     * Send the full payload — the service ignores fields not permitted for
-     * the current role/status combination rather than returning an error.
-     *
-     * Example request (NURSE correcting a mistyped temperature):
-     * PUT /api/visits/medical/42/edit
-     * {
-     *   "chiefComplaint": "Severe headache",
-     *   "temperature": "37.8",
-     *   "bloodPressure": "130/85",
-     *   "pulseRate": "76"
-     * }
+     * All edits are logged in the audit trail.
      */
     @PutMapping("/visits/medical/{id}/edit")
     @PreAuthorize("hasAnyRole('NURSE', 'MD')")
     public ResponseEntity<MedicalVisitResponse> editMedicalVisit(
-            @PathVariable Long id,
-            @RequestBody MedicalVisitEditRequest request,
-            Authentication auth
+        @PathVariable Long id,
+        @RequestBody MedicalVisitEditRequest request,
+        Authentication auth
     ) {
-        return ResponseEntity.ok(editService.editMedicalVisit(id, request, auth));
+        return ResponseEntity.ok(
+            editService.editMedicalVisit(id, request, auth)
+        );
     }
 
     /**
      * PUT /api/visits/dental/{id}/edit
      *
-     * Edits a dental visit in-place without advancing the workflow state.
+     * Edits a dental visit in-place without advancing the workflow status.
      *
-     *   NURSE  + CREATED_BY_NURSE    → updates vitals and chief complaint
-     *   DMD    + PENDING_DMD_REVIEW  → updates dental pmaasal section (must be assigned)
+     *   NURSE  + CREATED_BY_NURSE    → vitals and chief complaint
+     *   DMD    + PENDING_DMD_REVIEW  → clinical section (must be assigned)
      *   COMPLETED visits             → 400 Bad Request
      */
     @PutMapping("/visits/dental/{id}/edit")
     @PreAuthorize("hasAnyRole('NURSE', 'DMD')")
     public ResponseEntity<DentalVisitResponse> editDentalVisit(
-            @PathVariable Long id,
-            @RequestBody DentalVisitEditRequest request,
-            Authentication auth
+        @PathVariable Long id,
+        @RequestBody DentalVisitEditRequest request,
+        Authentication auth
     ) {
-        return ResponseEntity.ok(editService.editDentalVisit(id, request, auth));
+        return ResponseEntity.ok(
+            editService.editDentalVisit(id, request, auth)
+        );
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
     // IMPORT ENDPOINT
+    // ══════════════════════════════════════════════════════════════════════════
 
     /**
      * POST /api/visits/import
@@ -157,25 +156,22 @@ public class VisitManagementController {
      *
      * CSV format: produced by GET /api/visits/export (symmetric round-trip).
      * Column names must match the export headers exactly.
-     *
-     * BREAKING CHANGE vs old import:
-     *   The "Nurse Notes" column no longer maps to a TEXT field.
-     *   Content from that column creates an immutable NurseNote entity.
-     *   The note's createdBy is set to "import" with the current timestamp.
-     *
-     * Returns a plain confirmation message (identical to old API response)
-     * so the frontend requires no changes.
      */
-    @PostMapping(value = "/visits/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(
+        value = "/visits/import",
+        consumes = MediaType.MULTIPART_FORM_DATA_VALUE
+    )
     @PreAuthorize("hasAnyRole('NURSE', 'MD', 'DMD')")
     public ResponseEntity<String> importVisits(
-            @RequestParam("file") MultipartFile file
+        @RequestParam("file") MultipartFile file
     ) throws IOException {
         importExportService.importVisits(file);
         return ResponseEntity.ok("Visits imported successfully!");
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
     // EXPORT ENDPOINT
+    // ══════════════════════════════════════════════════════════════════════════
 
     /**
      * GET /api/visits/export
@@ -183,18 +179,14 @@ public class VisitManagementController {
      * Exports all visits to a CSV file with a UTF-8 BOM header so Excel
      * opens it with the correct encoding without manual configuration.
      *
-     * FIXED vs old export:
-     *   The old implementation used writer.printf with raw commas, which
-     *   broke for any medical text field containing a comma. This version
-     *   uses CSVPrinter which properly quotes fields as needed.
+     * Uses CSVPrinter which properly quotes fields containing commas,
+     * preventing data corruption for clinical text fields like diagnosis.
      *
-     * Nurse notes: all NurseNote entries for a visit are joined with " | "
-     * into the "Nurse Notes" column. Re-importing the exported file stores
-     * the combined text as a single NurseNote.
+     * Nurse notes: all NurseNote entries for a medical visit are joined
+     * with " | " into the "Nurse Notes" column.
      *
-     * Status column is included in the export but NOT in the import columns —
-     * imported visits are always set to COMPLETED regardless of the status
-     * value in the file.
+     * Status column is included in the export but ignored during import —
+     * all imported visits are always set to COMPLETED.
      */
     @GetMapping("/visits/export")
     @PreAuthorize("hasAnyRole('NURSE', 'MD', 'DMD')")

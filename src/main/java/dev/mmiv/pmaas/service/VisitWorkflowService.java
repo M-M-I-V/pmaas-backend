@@ -21,18 +21,22 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Orchestrates all multi-step visit workflow operations.
  *
+ * V13 CHANGES:
+ *   - completeDmdSection: field mapping updated to match V13 base entity layout.
+ *     history replaces dentalNotes; treatment replaces treatmentProvided;
+ *     toothStatus replaces toothInvolved. All base clinical fields are set
+ *     via the inherited Visits setters.
+ *   - toMedicalResponse / toDentalResponse: updated to include all fields
+ *     present in the revised response DTOs (medicalChartImage,
+ *     toothStatus, dentalChartImage, physicalExamFindings for dental, etc.).
+ *   - All other workflow steps are unchanged.
+ *
  * RESPONSIBILITIES:
  *   1. Validate state transitions via VisitStatus.validateTransition()
  *   2. Enforce ownership rules (assigned user check)
  *   3. Perform all mutations inside @Transactional methods
  *   4. Emit audit log entries for every workflow event
  *   5. Map entities to DTOs — never return raw entities
- *
- * SECURITY NOTE:
- *   @PreAuthorize on controllers enforces role-level access.
- *   This service enforces assignment-level access (isAssignedTo checks).
- *   Both layers are required — service checks prevent bypass via
- *   direct Spring context injection.
  */
 @Slf4j
 @Service
@@ -45,7 +49,9 @@ public class VisitWorkflowService {
     private final UsersRepository usersRepository;
     private final AuditLogService auditLogService;
 
+    // ══════════════════════════════════════════════════════════════════════════
     // STEP 1 — NURSE CREATES INITIAL VISIT
+    // ══════════════════════════════════════════════════════════════════════════
 
     @Transactional
     public VisitSummaryResponse createMedicalVisit(
@@ -66,8 +72,6 @@ public class VisitWorkflowService {
         visit.setPulseRate(req.pulseRate());
         visit.setRespiratoryRate(req.respiratoryRate());
         visit.setSpo2(req.spo2());
-        visit.setWeight(req.weight());
-        visit.setHeight(req.height());
 
         MedicalVisits saved = visitsRepository.save(visit);
 
@@ -129,7 +133,9 @@ public class VisitWorkflowService {
         return toSummary(saved);
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
     // STEP 2 — NURSE ASSIGNS TO MD OR DMD
+    // ══════════════════════════════════════════════════════════════════════════
 
     @Transactional
     public VisitSummaryResponse assignVisit(
@@ -140,7 +146,6 @@ public class VisitWorkflowService {
         String username = username(auth);
         Visits visit = loadVisit(visitId);
 
-        // Determine target status based on visit type and current status
         VisitType type = visit.getVisitType();
         VisitStatus target = switch (type) {
             case MEDICAL -> VisitStatus.PENDING_MD_REVIEW;
@@ -153,7 +158,6 @@ public class VisitWorkflowService {
             .findById(Math.toIntExact(req.assignToUserId()))
             .orElseThrow(() -> new UserNotFoundException(req.assignToUserId()));
 
-        // Validate assignee has the correct role for this visit type
         validateAssigneeRole(assignee, type, visitId);
 
         visit.setStatus(target);
@@ -168,7 +172,7 @@ public class VisitWorkflowService {
             Math.toIntExact(visitId),
             "VISIT_ASSIGNED",
             "Visit assigned to " +
-                assignee.getRole().toString() +
+                assignee.getRole() +
                 " (user ID " +
                 assignee.getId() +
                 ")" +
@@ -186,7 +190,9 @@ public class VisitWorkflowService {
         return toSummary(visit);
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
     // STEP 3a — MD COMPLETES MEDICAL SECTION
+    // ══════════════════════════════════════════════════════════════════════════
 
     @Transactional
     public MedicalVisitResponse completeMdSection(
@@ -216,6 +222,7 @@ public class VisitWorkflowService {
                 visitId
             );
 
+        // All clinical fields now live on the base Visits entity (after V13)
         visit.setHistory(req.history());
         visit.setPhysicalExamFindings(req.physicalExamFindings());
         visit.setDiagnosis(req.diagnosis());
@@ -225,7 +232,9 @@ public class VisitWorkflowService {
         visit.setHama(req.hama());
         visit.setReferralForm(req.referralForm());
         visit.setDiagnosticTestImage(req.diagnosticTestImage());
+        // MedicalVisits-specific
         visit.setMedicalChartImage(req.medicalChartImage());
+
         visit.setStatus(VisitStatus.PENDING_NURSE_REVIEW);
 
         visitsRepository.save(visit);
@@ -242,7 +251,9 @@ public class VisitWorkflowService {
         return toMedicalResponse(visit);
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
     // STEP 3b — DMD COMPLETES DENTAL SECTION
+    // ══════════════════════════════════════════════════════════════════════════
 
     @Transactional
     public DentalVisitResponse completeDmdSection(
@@ -272,13 +283,18 @@ public class VisitWorkflowService {
                 visitId
             );
 
+        // Base entity clinical fields (visits table after V13)
         visit.setDiagnosis(req.diagnosis());
-        visit.setDentalNotes(req.dentalNotes());
-        visit.setTreatmentProvided(req.treatmentProvided());
-        visit.setToothInvolved(req.toothInvolved());
+        visit.setHistory(req.history()); // was dentalNotes
+        visit.setPhysicalExamFindings(req.physicalExamFindings());
+        visit.setTreatment(req.treatment()); // was treatmentProvided
         visit.setPlan(req.plan());
         visit.setReferralForm(req.referralForm());
+
+        // DentalVisits-specific fields
+        visit.setToothStatus(req.toothStatus()); // was toothInvolved
         visit.setDentalChartImage(req.dentalChartImage());
+
         visit.setStatus(VisitStatus.COMPLETED);
         visit.setCompletedAt(LocalDateTime.now());
 
@@ -296,7 +312,9 @@ public class VisitWorkflowService {
         return toDentalResponse(visit);
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
     // STEP 4 — NURSE ADDS TIMESTAMPED NOTE (medical only)
+    // ══════════════════════════════════════════════════════════════════════════
 
     @Transactional
     public MedicalVisitResponse addNurseNote(
@@ -327,12 +345,11 @@ public class VisitWorkflowService {
             );
         }
 
-        // Create immutable note via package-private constructor
         NurseNote note = new NurseNote(visit, req.content(), username);
         nurseNoteRepository.save(note);
         visit.addNurseNote(note);
 
-        // First note in PENDING_NURSE_REVIEW transitions to COMPLETED
+        // First note in PENDING_NURSE_REVIEW → COMPLETED
         if (visit.getStatus() == VisitStatus.PENDING_NURSE_REVIEW) {
             visit.setStatus(VisitStatus.COMPLETED);
             visit.setCompletedAt(LocalDateTime.now());
@@ -355,14 +372,14 @@ public class VisitWorkflowService {
         return toMedicalResponse(visit);
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
     // PRIVATE HELPERS
+    // ══════════════════════════════════════════════════════════════════════════
 
     private Visits loadVisit(Long visitId) {
         return visitsRepository
             .findByIdWithPatient(visitId)
-            .orElseThrow(() ->
-                new dev.mmiv.pmaas.exception.PatientNotFoundException(visitId)
-            );
+            .orElseThrow(() -> new PatientNotFoundException(visitId));
     }
 
     private Patients loadPatient(Long patientId) {
@@ -371,10 +388,6 @@ public class VisitWorkflowService {
             .orElseThrow(() -> new PatientNotFoundException(patientId));
     }
 
-    /**
-     * Validates the authenticated user is the one assigned to this visit.
-     * Throws UnauthorizedVisitAccessException if not.
-     */
     private void validateAssignment(
         Visits visit,
         Long visitId,
@@ -391,7 +404,6 @@ public class VisitWorkflowService {
         }
     }
 
-    /** Ensures the assignee role matches the visit type. */
     private void validateAssigneeRole(
         Users assignee,
         VisitType type,
@@ -412,7 +424,7 @@ public class VisitWorkflowService {
                 "Cannot assign " +
                     type.name() +
                     " visit to user with role: " +
-                    role.toString()
+                    role
             );
         }
     }
@@ -422,7 +434,9 @@ public class VisitWorkflowService {
     }
 
     private Long userId(Authentication auth) {
-        if (auth.getPrincipal() instanceof UserPrincipal up) return (long) up.getId();
+        if (
+            auth.getPrincipal() instanceof UserPrincipal up
+        ) return (long) up.getId();
         throw new IllegalStateException(
             "Cannot extract user ID from authentication."
         );
@@ -439,7 +453,7 @@ public class VisitWorkflowService {
         return text.length() <= max ? text : text.substring(0, max) + "…";
     }
 
-    // DTO mappers
+    // ── DTO mappers ───────────────────────────────────────────────────────────
 
     private VisitSummaryResponse toSummary(Visits v) {
         return new VisitSummaryResponse(
@@ -456,25 +470,26 @@ public class VisitWorkflowService {
         );
     }
 
-    private MedicalVisitResponse toMedicalResponse(MedicalVisits v) {
+    public MedicalVisitResponse toMedicalResponse(MedicalVisits v) {
         List<NurseNoteResponse> notes = v
             .getNurseNotes()
             .stream()
             .map(NurseNoteResponse::from)
             .toList();
-
         return new MedicalVisitResponse(
             v.getId(),
             v.getStatus(),
             (long) v.getPatient().getId(),
             v.getPatient().getName(),
             v.getVisitDate(),
+            // Nurse vitals (base)
             v.getChiefComplaint(),
             v.getTemperature(),
             v.getBloodPressure(),
             v.getPulseRate(),
             v.getRespiratoryRate(),
             v.getSpo2(),
+            // MD clinical section (base entity after V13)
             v.getHistory(),
             v.getPhysicalExamFindings(),
             v.getDiagnosis(),
@@ -483,7 +498,11 @@ public class VisitWorkflowService {
             v.getDiagnosticTestResult(),
             v.getHama(),
             v.getReferralForm(),
+            v.getDiagnosticTestImage(),
+            // Medical-specific
+            v.getMedicalChartImage(),
             notes,
+            // Audit
             v.getCreatedBy(),
             v.getCreatedAt(),
             v.getAssignedToUserId(),
@@ -492,23 +511,29 @@ public class VisitWorkflowService {
         );
     }
 
-    private DentalVisitResponse toDentalResponse(DentalVisits v) {
+    public DentalVisitResponse toDentalResponse(DentalVisits v) {
         return new DentalVisitResponse(
             v.getId(),
             v.getStatus(),
             (long) v.getPatient().getId(),
             v.getPatient().getName(),
             v.getVisitDate(),
+            // Nurse vitals (base)
             v.getChiefComplaint(),
             v.getTemperature(),
             v.getBloodPressure(),
             v.getPulseRate(),
+            // DMD clinical section (base entity after V13)
+            v.getHistory(),
+            v.getPhysicalExamFindings(),
             v.getDiagnosis(),
-            v.getDentalNotes(),
-            v.getTreatmentProvided(),
-            v.getToothInvolved(),
             v.getPlan(),
+            v.getTreatment(),
             v.getReferralForm(),
+            // Dental-specific
+            v.getToothStatus(),
+            v.getDentalChartImage(),
+            // Audit
             v.getCreatedBy(),
             v.getCreatedAt(),
             v.getAssignedToUserId(),
